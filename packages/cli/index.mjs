@@ -73,8 +73,20 @@ async function setupDashboardFromTarball(guardioPath) {
       "Dashboard tarball missing packages/dashboard. Wrong repo or branch?",
     );
   }
+  // Copy only the dashboard package contents into guardioPath/dashboard (never the whole repo)
   await mkdir(dashboardPath, { recursive: true });
-  cpSync(srcDashboard, dashboardPath, { recursive: true });
+  const dashboardEntries = readdirSync(srcDashboard, { withFileTypes: true });
+  for (const e of dashboardEntries) {
+    cpSync(join(srcDashboard, e.name), join(dashboardPath, e.name), {
+      recursive: true,
+    });
+  }
+  const dashboardPkgJson = join(dashboardPath, "package.json");
+  if (!existsSync(dashboardPkgJson)) {
+    throw new Error(
+      "Dashboard package missing package.json after copy. Wrong repo layout?",
+    );
+  }
   console.log("Installing dashboard dependencies...");
   const installResult = spawnSync(
     "pnpm",
