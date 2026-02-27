@@ -173,7 +173,14 @@ Blocked tool calls return a **success** result with **`result.isError: true`** a
 
 ## Dashboard
 
-The **dashboard** (`@guardiojs/dashboard`) is a Next.js web UI for Guardio. It lets you view activity (allowed/blocked tool calls), manage policies, and inspect agents and topology. You can add it when scaffolding with `npx create-guardio` (choose “Install dashboard?”), or install it later: `pnpm add @guardiojs/dashboard`. The package exposes a **`dashboard`** bin, so in your project run **`pnpm run dashboard`** (or add a script `"dashboard": "dashboard"` and use `npm run dashboard`). By default it starts in dev mode; use `pnpm run dashboard -- --prod` for a production build. Set the Guardio server URL via env (e.g. `NEXT_PUBLIC_GUARDIO_URL=http://127.0.0.1:3939 pnpm run dashboard`).
+<p align="center">
+  <picture>
+    <img alt="High view" src="./docs/topology-example.png">
+  </picture>
+</p>
+
+
+The **dashboard** is a Next.js web UI for Guardio. It lets you view activity (allowed/blocked tool calls), manage policies, and inspect agents and topology. You can add it when scaffolding with `npx create-guardio` (choose “Install dashboard?”).
 
 ---
 
