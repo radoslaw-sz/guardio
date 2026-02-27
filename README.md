@@ -1,28 +1,39 @@
-# Guardio
+<p align="center">
+  <img src="packages/dashboard/public/favicon.svg" alt="Guardio" width="48" height="48" />
+</p>
 
-A framework-agnostic security layer that sits between an MCP client (e.g. AI Agent) and an MCP server. It proxies JSON-RPC and lets you do various actions on `tools/call` requests before they reach the real server. For instance, you can forbid calling tools with some parameters, sanitize the input or output, make human approval and much more - everything through the plugin system.
+<p align="center">
+  <h1 align="center">
+    Guardio
+  </h1>
+</p>
+
+Guardio is a **proxy** that sits between your **AI Agent system** and the external world. It catches and evaluates messages flowing to and from **MCP tools** and other APIs before they reach the real servers. You can enforce policies (allow, block, sanitize), require approval, and observe activity—all through a **plugin system**.
 
 <p align="center">
   <picture>
-    <img alt="High view" src="./docs/high-view.png">
+    <img alt="High view" src="./docs/high-view-2.png">
   </picture>
 </p>
 
-## What it does
+## Supported connections
 
-- **Proxies** stdin/stdout between the client and the real MCP server (also HTTP in the future)
-- **Intercepts** `tools/call` requests and runs them through:
-  1. **Policy plugins** – each can allow, block, or require approval. If any policy returns _blocked_, the call is rejected.
-  2. **Intervention plugins** – each can run side effects (e.g. log, show approval UI). If any returns _reject_, the call is rejected.
-- **Forwards** the call to the real MCP server only when all policies and interventions allow it.
+| Connection type             | Status     | Notes                                                 |
+| --------------------------- | ---------- | ----------------------------------------------------- |
+| **HTTP server**             | Supported  | Guardio runs as an HTTP server; clients connect here. |
+| **MCP tool (upstream)**     | Supported  | Proxying to MCP servers over HTTP/SSE.                |
+| **stdio**                   | On the way | Client transport.                                     |
+| **Other APIs / transports** | On the way | Extensible for more protocols.                        |
 
-**More functionalities will be added in the future.**
+Today you run one **Guardio instance** that fronts **all** your external MCP tools and APIs (one proxy, many upstreams).
 
-The CLI is available as `guardio` (or via `pnpm run guardio`).
+---
 
-## Quick start: create Guardio (per MCP server)
+## Quick start
 
-Scaffold a directory with a config and a bin you can point your MCP client at:
+### Create a Guardio project
+
+Scaffold a new project with config and optional plugins:
 
 ```bash
 npx create-guardio
@@ -30,192 +41,141 @@ npx create-guardio
 
 You will be prompted for:
 
-- **Guardio directory** – e.g. `./my-secured-mcp` (created for you).
-- **MCP Server command** – e.g. `node`, `python`.
-- **MCP Server args** – e.g. path to your server script (comma-separated if multiple).
+- **Guardio directory** – e.g. `guardio-project` (default)
+- **Guardio HTTP port** – e.g. `3939`
+- **Storage and events** – optional; needed for dashboard and policy state. Choose SQLite (in-memory by default, or file `guardio.sqlite`) or PostgreSQL.
+- **Example custom policy plugin?** – optional; scaffolds `plugins/example`
+- **Install dashboard?** – optional; adds `@guardiojs/dashboard` and a `dashboard` run script
 
-This writes **guardio.config.json** (with `server` and default plugins) and **bin/guardio** in that directory. At the end you’ll see:
+The scaffold creates **empty `servers`** by default. A commented example in `guardio.config.ts` shows how to add an MCP server (e.g. `{ name: "nuvei-docs", type: "url", url: "https://mcp.nuvei.com/sse" }`). All built-in policy plugins (**deny-tool-access**, **deny-regex-parameter**) are included by default.
 
-```
-Add to MCP client
-
-# Copy/paste the shown command
-
-./my-secured-mcp/bin/guardio
-```
-
-Add that path to your MCP client config (e.g. Cursor’s `mcp.json`) as the command to run for this MCP server.
-
-Or just execute the command if you are running your MCP server locally.
-
-## Configuration
-
-Guardio loads a config file either from **current working directory** (when run without `--config`) or from the path given by **`--config`**. It looks for (in order):
-
-- `guardio.config.js`
-- `guardio.config.ts`
-- `guardio.config.json`
-
-The config must have a **plugins** array. It can optionally have **server** (used when you run with `--config`):
-
-- **`server`** – optional. When present and you use `--config`, Guardio uses this instead of argv/env to run the MCP server: **`{ "type": "command", "command": "node", "args": ["path/to/server.js"] }`**. Paths in **`args`** can be **relative** (resolved from the config file’s directory) or **absolute** (used as-is).
-
-Each **plugins** entry has:
-
-- **`type`** – `"policy"` or `"intervention"`
-- **`name`** – which plugin to use (e.g. `"default"`, `"regex"`, `"http"`)
-- **`config`** – optional object passed to the plugin
-
-### Example: `guardio.config.json`
-
-```json
-{
-  "server": {
-    "type": "command",
-    "command": "node",
-    "args": ["/path/to/your-mcp-server/index.js"]
-  },
-  "plugins": [
-    {
-      "type": "policy",
-      "name": "regex",
-      "config": {
-        "rules": [
-          {
-            "name": "get_weather",
-            "parameter_name": "location",
-            "regex": "secret|internal|localhost",
-            "flags": "i"
-          }
-        ]
-      }
-    },
-    {
-      "type": "intervention",
-      "name": "http",
-      "config": { "port": 3939, "timeoutMs": 120000 }
-    }
-  ]
-}
-```
-
-When using **`--config /path/to/guardio.config.json`**, the **server** block above is used automatically; you don’t pass the MCP server command on the command line.
-
-### Custom plugins (path in config)
-
-Use a **`path`** on a plugin entry to load a custom plugin from a directory (relative to the config file or absolute). That directory must contain **`index.js`** or **`index.mjs`** (compile from `index.ts` with your build script). The module's **default export must be the plugin instance**.
-
-For reference, check the /example plugin generated by the `npx create-guardio`.
-
-## Running Guardio (CLI)
-
-You must tell Guardio **which command to run** for the real MCP server (unless you use `--config` with a config that has **server**). Options:
-
-### 1. Direct arguments
+Then:
 
 ```bash
-guardio node /path/to/your-mcp-server/index.js
+cd <guardio-directory>
+npm install   # or: pnpm install, yarn, bun install, etc.
+npm run guardio
 ```
 
-### 2. After `--`
+Point your AI Agent or MCP client at `http://127.0.0.1:<port>`. If you installed the dashboard, run `pnpm run dashboard` (or `npm run dashboard`) and point it at the same Guardio base URL.
 
-```bash
-guardio -- node /path/to/your-mcp-server/index.js
-```
+---
 
-### 3. Environment variables
+## Concepts
 
-```bash
-export GUARDIO_COMMAND=node
-export GUARDIO_ARGS=/path/to/your-mcp-server/index.js
-guardio
-```
+### AI Agent connection
 
-Or use `MCP_REAL_TOOL_COMMAND` and `MCP_REAL_TOOL_ARGS` (comma-separated) for the same purpose.
+AI Agents (MCP clients) connect to **Guardio’s HTTP server**, not directly to the upstream MCP servers. Guardio is the single entry point.
 
-### 4. Config file with `--config`
+- **SSE (stream)** – Connect to `http://<host>:<port>/{serverName}/sse` for the MCP SSE stream. Use the **server name** from your config (e.g. `nuvei-docs` → `/nuvei-docs/sse`).
+- **Optional `x-agent-name`** – Send this header on the SSE connection to give the agent a human-readable name. If omitted, Guardio generates one. The connection is assigned an agent id used for policy scoping.
+- **POST messages** – Send JSON-RPC to `http://<host>:<port>/{serverName}/messages`. You can send **`x-agent-id`** (the id for the SSE connection) so policies can be applied per agent.
 
-```bash
-guardio --config /path/to/guardio.config.json
-```
+So: one Guardio URL base, multiple paths like `/{mcp-tool}/sse` and `/{mcp-tool}/messages` for each configured upstream.
 
-If the config contains **server** with **type `"command"`**, that command and args are used; no need to pass them on the command line. The config path is also used to load **plugins**.
+### MCP tool connection
 
-Guardio will **spawn** that command and proxy stdin/stdout to it. Make sure a **guardio config** exists (in the current working directory or via `--config`).
+In your config you define a **`servers`** array. Each entry has a **`name`** (unique, used in the URL path) and an **`url`** (the upstream MCP server’s HTTP/SSE base URL). Guardio proxies:
 
-## Example with Cursor MCP
+- **GET /{name}/sse** – to the upstream SSE endpoint (and manages the stream).
+- **POST /{name}/messages** – to the upstream after running policies (or returns a blocked result without forwarding).
 
-Point Cursor’s MCP config to Guardio instead of the real server. Example `.cursor/mcp.json`:
+So each “MCP tool” or upstream is one entry in `servers`; a single Guardio instance serves all of them.
 
-```json
-{
-  "mcpServers": {
-    "my-tool-gated": {
-      "command": "node",
-      "args": [
-        "/path/to/guardio-draft/bin/guardio.mjs",
-        "--",
-        "node",
-        "/path/to/actual-mcp-server/index.js"
-      ]
-    }
-  }
-}
-```
+### Plugins
 
-Or use the built-in bin if the package is linked/installed:
+Plugins extend Guardio’s behavior. Types:
 
-```json
-{
-  "mcpServers": {
-    "my-tool-gated": {
-      "command": "guardio",
-      "args": ["--", "node", "/path/to/actual-mcp-server/index.js"]
-    }
-  }
-}
-```
+| Type               | Role                                                                                                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| **Policy**         | Evaluate `tools/call` requests: allow, block, or modify arguments. Optional; no policies means all calls pass through. |
+| **Storage**        | Persist state (e.g. policy assignments, agent list). Used by built-in policy config and dashboard.                     |
+| **EventSink**      | Receive events for each processed request (e.g. ALLOWED/BLOCKED, tool name, policy).                                   |
+| **EventSinkStore** | Store and query events; used by the dashboard for activity views.                                                      |
 
-Cursor talks to Guardio; Guardio applies policies and interventions, then talks to your real MCP server.
+**Built-in plugins:**
 
-## Built-in plugins
+- **Policy:** `deny-tool-access`, `deny-regex-parameter` (both are added by default when you scaffold with `create-guardio`)
+- **Storage / EventSink / EventSinkStore:** `sqlite` or `postgres`
+  - **sqlite:** `config: { inMemory: true }` (default) or `config: { database: "guardio.sqlite" }` for a file
+  - **postgres:** `config: { connectionString: "postgresql://user:pass@host:5432/dbname" }` or discrete `host`, `port`, `user`, `password`, `database`, `ssl`
 
-### Policy plugins
+You register plugins in **`guardio.config.ts`** in the **`plugins`** array. Policy config for built-ins is typically managed at runtime (e.g. via the dashboard), not in the config file.
 
-- **`default`** – Block calls by tool name. Config required: `{ blockedTools: ["tool_a", "tool_b"] }`. No default block list.
-- **`regex`** – Blocks based on rules aligned to the tools/call schema. Config:
-  - **`rules`** – array of:
-    - **`name`** – tool name (exact match).
-    - **`parameter_name`** – optional; if set, the regex is applied to this argument’s value; otherwise to the tool name.
-    - **`regex`** – pattern string (if it matches, the call is blocked).
-    - **`flags`** – optional RegExp flags (e.g. `"i"`).
-  - **`debug`** – optional boolean; if `true`, logs evaluation details to stderr.
+### Create a custom plugin
 
-### Intervention plugins
+Use a **path-based** plugin: in config add an entry with **`path`** pointing to a directory that contains **`index.js`** or **`index.mjs`** (build from `index.ts` if needed). The module’s **default export must be the plugin instance**.
 
-- **`default`** – No-op. Config: `{}`.
-- **`http`** – Starts an HTTP server and waits for user approve/reject before forwarding. Config:
-  - **`port`** – default `3939`.
-  - **`timeoutMs`** – approval timeout in ms; default `120000`.
-
-## Programmatic API
-
-You can use the core and plugins in code:
+Example for a custom policy:
 
 ```ts
-import { GuardioCore } from "@guardiojs/guardio";
+// plugins/my-policy/index.ts
+import type {
+  PolicyPluginInterface,
+  PolicyRequestContext,
+  PolicyResult,
+} from "@guardiojs/guardio";
 
-const core = new GuardioCore({
-  command: "node",
-  args: ["/path/to/mcp-server/index.js"],
-  cwd: "/path/to/dir/with/guardio.config.json", // optional
-  configPath: "/path/to/guardio.config.json", // optional
-});
-
-await core.run();
+class MyPolicyPlugin implements PolicyPluginInterface {
+  readonly name = "my-policy";
+  async evaluate(context: PolicyRequestContext): Promise<PolicyResult> {
+    // allow | block | modify args
+    return Promise.resolve({ verdict: "allow" });
+  }
+}
+export default new MyPolicyPlugin();
 ```
 
-Policy and intervention plugins are loaded from the config file; you can also implement custom plugins and register them with `PluginManager` before running the core.
+In config:
+
+```ts
+{ type: "policy", name: "my-policy", path: "./plugins/my-policy" }
+```
+
+If you chose “Add example custom policy plugin” when running `npx create-guardio`, see the generated `plugins/example` folder.
+
+---
+
+## Processing
+
+### Evaluating policy
+
+When a **`tools/call`** request hits Guardio (POST `/{serverName}/messages`):
+
+1. Guardio resolves which **policy plugins** apply (from storage, optionally scoped by agent and tool).
+2. Each policy’s **`evaluate`** is run with the tool name and arguments.
+3. If any policy returns **block**, the call is **not** forwarded. Guardio responds with a **success** JSON-RPC result that includes a human-readable message and **`_guardio`** metadata (so agent frameworks don’t treat it as a fatal error).
+4. If all policies **allow**, the request (with any **modified arguments**) is forwarded to the upstream MCP server and the response is proxied back.
+
+Non–`tools/call` messages are forwarded without policy evaluation.
+
+### Emitting events
+
+If **EventSink** plugins are configured, Guardio emits a **GuardioEvent** for each processed `tools/call` (both allowed and blocked). The event includes:
+
+- **decision** – `ALLOWED` or `BLOCKED`
+- **tool name**, **request id**, **agent id** (if present)
+- For blocks: **policy name**, **code**, **reason**
+
+EventSinkStore (e.g. sqlite or postgres) persists these for the dashboard and for your own auditing.
+
+---
+
+## Configuration and running
+
+- **Config file:** `guardio.config.ts` (or pass `--config <path>`). It must export a **`GuardioConfig`** with **`servers`** (array of `{ name, type: "url", url }`; can be empty) and **`plugins`**. The scaffold adds a commented example server in the config so you can uncomment and edit to add MCP upstreams.
+- **Client (HTTP server):** Optional **`client`** with **`port`** (default `3939`) and **`host`** (default `127.0.0.1`). Override with **`GUARDIO_HTTP_PORT`** and **`GUARDIO_HTTP_HOST`**.
+- **Debug:** `GUARDIO_DEBUG=1` to log request/response flow.
+
+Blocked tool calls return a **success** result with **`result.isError: true`** and **`result._guardio`** (version, requestId, timestamp, policyId, action). See the repo for the full response shape.
+
+---
+
+## Dashboard
+
+The **dashboard** (`@guardiojs/dashboard`) is a Next.js web UI for Guardio. It lets you view activity (allowed/blocked tool calls), manage policies, and inspect agents and topology. You can add it when scaffolding with `npx create-guardio` (choose “Install dashboard?”), or install it later: `pnpm add @guardiojs/dashboard`. The package exposes a **`dashboard`** bin, so in your project run **`pnpm run dashboard`** (or add a script `"dashboard": "dashboard"` and use `npm run dashboard`). By default it starts in dev mode; use `pnpm run dashboard -- --prod` for a production build. Set the Guardio server URL via env (e.g. `NEXT_PUBLIC_GUARDIO_URL=http://127.0.0.1:3939 pnpm run dashboard`).
+
+---
 
 ## License
 
