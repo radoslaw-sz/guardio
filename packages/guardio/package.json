@@ -1,6 +1,6 @@
 {
   "name": "@guardiojs/guardio",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Guardio is a proxy that sits between your AI Agent system and the external world",
   "type": "module",
   "main": "dist/index.js",

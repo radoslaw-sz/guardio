@@ -166,6 +166,12 @@ export default async function ActivityDetailPage({
                     </dd>
                   </div>
                   <div>
+                    <dt className="text-xs text-gray-500 dark:text-gray-400">Agent name</dt>
+                    <dd className="mt-0.5 text-sm text-gray-900 dark:text-gray-100">
+                      {event.agentNameSnapshot ?? "—"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-xs text-gray-500 dark:text-gray-400">Action / Tool</dt>
                     <dd className="mt-0.5 text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1">
                       <Wrench className="size-3.5" />

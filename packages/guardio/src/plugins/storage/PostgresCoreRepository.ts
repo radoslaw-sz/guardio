@@ -123,6 +123,32 @@ export class PostgresCoreRepository implements CoreRepository {
     }));
   }
 
+  async getAgentByName(name: string, serverName: string): Promise<Agent | null> {
+    const result = await this.pool.query(
+      `SELECT a.id, a.name, a.name_generated AS "nameGenerated", rp.name AS "serverName"
+       FROM agents a
+       INNER JOIN connections c ON c.agent_id = a.id
+       INNER JOIN resource_providers rp ON rp.id = c.provider_id
+       WHERE a.name = $1 AND rp.name = $2`,
+      [name, serverName],
+    );
+    const row = result.rows[0] as
+      | {
+          id: string;
+          name: string | null;
+          nameGenerated: boolean;
+          serverName: string | null;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name ?? "",
+      serverName: row.serverName ?? undefined,
+      nameGenerated: row.nameGenerated ? true : undefined,
+    };
+  }
+
   async deleteAgent(id: string): Promise<void> {
     await this.pool.query("DELETE FROM connections WHERE agent_id = $1", [id]);
     await this.pool.query("DELETE FROM agents WHERE id = $1", [id]);

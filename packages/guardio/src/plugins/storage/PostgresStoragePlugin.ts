@@ -118,24 +118,25 @@ CREATE INDEX IF NOT EXISTS idx_assignments_provider ON policy_assignments(provid
 
 -- Guardio events (event sink)
 CREATE TABLE IF NOT EXISTS guardio_events (
-  event_id         TEXT PRIMARY KEY,
-  schema_version   TEXT NOT NULL,
-  timestamp        TEXT NOT NULL,
-  event_type       TEXT NOT NULL,
-  action_type      TEXT,
-  agent_id         TEXT,
-  trace_id         TEXT,
-  span_id          TEXT,
-  target_resource  TEXT,
-  decision         TEXT,
-  policy_evaluation JSONB,
-  request_payload  JSONB,
-  response_payload JSONB,
-  metrics          JSONB,
-  metadata         JSONB,
-  http_status      INTEGER,
-  error_code       TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+  event_id             TEXT PRIMARY KEY,
+  schema_version       TEXT NOT NULL,
+  timestamp            TEXT NOT NULL,
+  event_type           TEXT NOT NULL,
+  action_type          TEXT,
+  agent_id             TEXT,
+  agent_name_snapshot  TEXT,
+  trace_id             TEXT,
+  span_id              TEXT,
+  target_resource      TEXT,
+  decision             TEXT,
+  policy_evaluation    JSONB,
+  request_payload      JSONB,
+  response_payload     JSONB,
+  metrics              JSONB,
+  metadata             JSONB,
+  http_status          INTEGER,
+  error_code           TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 `;
 
@@ -154,7 +155,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
     const limit = Math.min(Math.max(options?.limit ?? 100, 1), 1000);
     const result = await this.pool.query(
       `SELECT event_id AS "eventId", timestamp, event_type AS "eventType", action_type AS "actionType",
-              agent_id AS "agentId", decision, policy_evaluation AS "policyEvaluation"
+              agent_id AS "agentId", agent_name_snapshot AS "agentNameSnapshot", decision, policy_evaluation AS "policyEvaluation"
        FROM guardio_events
        ORDER BY created_at DESC
        LIMIT $1`,
@@ -167,6 +168,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         eventType: string;
         actionType: string | null;
         agentId: string | null;
+        agentNameSnapshot: string | null;
         decision: string | null;
         policyEvaluation: Record<string, unknown> | null;
       }) => ({
@@ -175,6 +177,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         eventType: r.eventType,
         actionType: r.actionType ?? undefined,
         agentId: r.agentId ?? undefined,
+        agentNameSnapshot: r.agentNameSnapshot ?? undefined,
         decision: r.decision ?? undefined,
         policyEvaluation: r.policyEvaluation ?? undefined,
       }),
@@ -185,10 +188,10 @@ class PostgresEventSinkRepository implements EventSinkRepository {
     await this.pool.query(
       `INSERT INTO guardio_events (
         event_id, schema_version, timestamp, event_type, action_type,
-        agent_id, trace_id, span_id, target_resource, decision,
+        agent_id, agent_name_snapshot, trace_id, span_id, target_resource, decision,
         policy_evaluation, request_payload, response_payload, metrics, metadata,
         http_status, error_code
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         event.eventId,
         event.schemaVersion,
@@ -196,6 +199,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         event.eventType,
         event.actionType ?? null,
         event.agentId ?? null,
+        event.agentNameSnapshot ?? null,
         event.traceId ?? null,
         event.spanId ?? null,
         event.targetResource ?? null,

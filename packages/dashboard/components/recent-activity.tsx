@@ -21,6 +21,7 @@ function mapEventToActivity(e: {
   eventType: string;
   actionType?: string | null;
   agentId?: string | null;
+  agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string } | null;
 }): ActivityEntry {
@@ -28,7 +29,7 @@ function mapEventToActivity(e: {
     id: e.eventId,
     timestamp: e.timestamp,
     type: e.decision === "BLOCKED" ? "denied" : "allowed",
-    agent: e.agentId ?? "Unknown",
+    agent: e.agentNameSnapshot ?? e.agentId ?? "Unknown",
     tool: e.actionType ?? e.eventType ?? "—",
     policy: e.policyEvaluation?.policyName,
   };

@@ -16,7 +16,9 @@ export interface PostRequestPayload {
   /** Server name from path segment (/:mcpId/messages). Used to route to the correct upstream transport. */
   serverName: string;
   reply: (status: number, body: string) => void;
-  /** Optional agent id (e.g. from x-agent-id header). When null, only global and tool-scoped policy assignments apply. */
+  /** Agent name from x-agent-name header (same as discovered at SSE connect). When null, no agent name was sent. */
+  agentNameSnapshot?: string | null;
+  /** Resolved from DB by agent name (x-agent-name) + serverName; null if no header or agent not found. When null, only global and tool-scoped policy assignments apply. */
   agentId?: string | null;
 }
 

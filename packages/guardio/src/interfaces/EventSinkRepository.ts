@@ -7,6 +7,8 @@ export interface StoredEvent {
   eventType: string;
   actionType?: string | null;
   agentId?: string | null;
+  /** Agent name from x-agent-name at request time (same as discovered at SSE connect). */
+  agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: Record<string, unknown> | null;
 }

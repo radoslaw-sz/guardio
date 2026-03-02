@@ -124,6 +124,32 @@ export class SqliteCoreRepository implements CoreRepository {
     }));
   }
 
+  async getAgentByName(name: string, serverName: string): Promise<Agent | null> {
+    const row = this.db
+      .prepare(
+        `SELECT a.id, a.name, a.name_generated AS nameGenerated, rp.name AS serverName
+         FROM agents a
+         INNER JOIN connections c ON c.agent_id = a.id
+         INNER JOIN resource_providers rp ON rp.id = c.provider_id
+         WHERE a.name = ? AND rp.name = ?`,
+      )
+      .get(name, serverName) as
+      | {
+          id: string;
+          name: string | null;
+          nameGenerated: number;
+          serverName: string | null;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name ?? "",
+      serverName: row.serverName ?? undefined,
+      nameGenerated: row.nameGenerated !== 0 ? true : undefined,
+    };
+  }
+
   async deleteAgent(id: string): Promise<void> {
     this.db.prepare("DELETE FROM connections WHERE agent_id = ?").run(id);
     this.db.prepare("DELETE FROM agents WHERE id = ?").run(id);

@@ -105,6 +105,8 @@ export interface DashboardActivityEvent {
   eventType: string;
   actionType?: string | null;
   agentId?: string | null;
+  /** Agent name from x-agent-name at request time. */
+  agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string; code?: string; reason?: string } | null;
 }

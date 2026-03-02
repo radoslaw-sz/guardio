@@ -1,7 +1,18 @@
 import type { GuardioConfig } from "./src/config/types.js";
 
 const config: GuardioConfig = {
-  servers: [],
+  servers: [
+    {
+      name: "nuvei-docs",
+      type: "url",
+      url: "https://mcp.nuvei.com/sse",
+    },
+    {
+      name: "nuvei-docs-backup",
+      type: "url",
+      url: "https://mcp.nuvei.com/sse",
+    },
+  ],
   client: {
     mode: "http",
     port: 3939,
@@ -10,17 +21,17 @@ const config: GuardioConfig = {
     {
       type: "storage",
       name: "sqlite",
-      config: { inMemory: true },
+      config: { database: "guardio.sqlite" },
     },
     {
       type: "eventSink",
       name: "sqlite",
-      config: { inMemory: true },
+      config: { database: "guardio.sqlite" },
     },
     {
       type: "eventSinkStore",
       name: "sqlite",
-      config: { inMemory: true },
+      config: { database: "guardio.sqlite" },
     },
     {
       type: "policy",
@@ -29,7 +40,7 @@ const config: GuardioConfig = {
     {
       type: "policy",
       name: "deny-regex-parameter",
-    }
+    },
   ],
 };
 

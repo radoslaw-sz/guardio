@@ -6,6 +6,7 @@ export type GuardioEvent = {
   actionType?: string;
 
   agentId?: string;
+  agentNameSnapshot?: string;
   traceId?: string;
   spanId?: string;
 

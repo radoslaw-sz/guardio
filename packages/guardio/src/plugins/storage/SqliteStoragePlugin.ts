@@ -40,7 +40,7 @@ class SqliteEventSinkRepository implements EventSinkRepository {
     const rows = this.db
       .prepare(
         `SELECT event_id AS eventId, timestamp, event_type AS eventType, action_type AS actionType,
-                agent_id AS agentId, decision, policy_evaluation AS policyEvaluation
+                agent_id AS agentId, agent_name_snapshot AS agentNameSnapshot, decision, policy_evaluation AS policyEvaluation
          FROM guardio_events
          ORDER BY created_at DESC
          LIMIT ?`,
@@ -51,6 +51,7 @@ class SqliteEventSinkRepository implements EventSinkRepository {
       eventType: string;
       actionType: string | null;
       agentId: string | null;
+      agentNameSnapshot: string | null;
       decision: string | null;
       policyEvaluation: string | null;
     }>;
@@ -60,6 +61,7 @@ class SqliteEventSinkRepository implements EventSinkRepository {
       eventType: r.eventType,
       actionType: r.actionType ?? undefined,
       agentId: r.agentId ?? undefined,
+      agentNameSnapshot: r.agentNameSnapshot ?? undefined,
       decision: r.decision ?? undefined,
       policyEvaluation: r.policyEvaluation
         ? (JSON.parse(r.policyEvaluation) as Record<string, unknown>)
@@ -72,10 +74,10 @@ class SqliteEventSinkRepository implements EventSinkRepository {
       .prepare(
         `INSERT INTO guardio_events (
           event_id, schema_version, timestamp, event_type, action_type,
-          agent_id, trace_id, span_id, target_resource, decision,
+          agent_id, agent_name_snapshot, trace_id, span_id, target_resource, decision,
           policy_evaluation, request_payload, response_payload, metrics, metadata,
           http_status, error_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.eventId,
@@ -84,6 +86,7 @@ class SqliteEventSinkRepository implements EventSinkRepository {
         event.eventType,
         event.actionType ?? null,
         event.agentId ?? null,
+        event.agentNameSnapshot ?? null,
         event.traceId ?? null,
         event.spanId ?? null,
         event.targetResource ?? null,
@@ -218,24 +221,25 @@ export class SqliteStoragePlugin implements StorageAdapter {
 
         -- Guardio events (event sink)
         CREATE TABLE IF NOT EXISTS guardio_events (
-          event_id         TEXT PRIMARY KEY,
-          schema_version   TEXT NOT NULL,
-          timestamp        TEXT NOT NULL,
-          event_type       TEXT NOT NULL,
-          action_type      TEXT,
-          agent_id         TEXT,
-          trace_id         TEXT,
-          span_id          TEXT,
-          target_resource  TEXT,
-          decision         TEXT,
-          policy_evaluation TEXT,
-          request_payload  TEXT,
-          response_payload TEXT,
-          metrics          TEXT,
-          metadata         TEXT,
-          http_status      INTEGER,
-          error_code       TEXT,
-          created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+          event_id             TEXT PRIMARY KEY,
+          schema_version       TEXT NOT NULL,
+          timestamp            TEXT NOT NULL,
+          event_type           TEXT NOT NULL,
+          action_type          TEXT,
+          agent_id             TEXT,
+          agent_name_snapshot  TEXT,
+          trace_id             TEXT,
+          span_id              TEXT,
+          target_resource      TEXT,
+          decision             TEXT,
+          policy_evaluation    TEXT,
+          request_payload      TEXT,
+          response_payload     TEXT,
+          metrics              TEXT,
+          metadata             TEXT,
+          http_status          INTEGER,
+          error_code           TEXT,
+          created_at           TEXT NOT NULL DEFAULT (datetime('now'))
         );
       `);
     logger.debug(this.logContext(), "SQLite storage tables created");

@@ -373,12 +373,18 @@ export class HttpClientTransport extends EventEmitter implements IClientTranspor
         return reply.status(404).send({ error: "Unknown server" });
       }
       const body = typeof request.body === "string" ? request.body : "";
-      const agentId = (request.headers["x-agent-id"] as string | undefined)?.trim() ?? null;
+      const agentNameSnapshot = (request.headers["x-agent-name"] as string | undefined)?.trim() ?? null;
+      let agentId: string | null = null;
+      if (agentNameSnapshot) {
+        const agent = await this.coreRepository.getAgentByName(agentNameSnapshot, mcpId);
+        if (agent) agentId = agent.id;
+      }
       let replied = false;
       const payload: PostRequestPayload = {
         body,
         serverName: mcpId,
-        agentId: agentId || null,
+        agentNameSnapshot: agentNameSnapshot ?? null,
+        agentId: agentId ?? null,
         reply: (status: number, responseBody: string) => {
           if (replied) return;
           replied = true;

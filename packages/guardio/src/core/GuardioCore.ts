@@ -141,7 +141,7 @@ export class GuardioCore {
 
     this.clientTransport.on(
       "postRequest",
-      async ({ body, reply, serverName, agentId }) => {
+      async ({ body, reply, serverName, agentId, agentNameSnapshot }) => {
         try {
           const transport = this.serverTransports.get(serverName);
           if (!transport?.getRemotePostUrl()) {
@@ -152,6 +152,7 @@ export class GuardioCore {
             body,
             serverName,
             agentId ?? null,
+            agentNameSnapshot ?? null,
           );
           reply(result.status, result.body);
         } catch (err) {
@@ -342,6 +343,7 @@ export class GuardioCore {
           eventType: e.eventType,
           actionType: e.actionType ?? null,
           agentId: e.agentId ?? null,
+          agentNameSnapshot: e.agentNameSnapshot ?? null,
           decision: e.decision ?? null,
           policyEvaluation: e.policyEvaluation ?? null,
         })),
@@ -515,6 +517,7 @@ export class GuardioCore {
     body: string,
     serverName: string,
     agentId: string | null = null,
+    agentNameSnapshot: string | null = null,
   ): Promise<{ status: number; body: string }> {
     const transport = this.serverTransports.get(serverName);
     const url = transport?.getRemotePostUrl() ?? null;
@@ -576,8 +579,8 @@ export class GuardioCore {
         policyPlugins,
         eventSinks,
         agentId,
+        agentNameSnapshot,
       });
-
       if (processResult.handled) {
         if (processResult.body)
           this.sendToClient(processResult.body, serverName);

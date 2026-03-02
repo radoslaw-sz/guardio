@@ -46,6 +46,8 @@ export interface CoreRepository {
   deleteAgent(id: string): Promise<void>;
   /** List all connections (one row per agent+server; same agent can appear for multiple servers). */
   listAgents(): Promise<Agent[]>;
+  /** Get agent by display name and server (e.g. for resolving x-agent-name on POST /messages). Returns null if not found. */
+  getAgentByName(name: string, serverName: string): Promise<Agent | null>;
 
   /**
    * Resolution query: policies that apply to the given context.

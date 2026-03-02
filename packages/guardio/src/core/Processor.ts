@@ -31,6 +31,8 @@ export interface ProcessInput {
   eventSinks?: EventSinkPluginInterface[];
   /** Optional agent id for event correlation. */
   agentId?: string | null;
+  /** Optional agent name snapshot for event correlation. */
+  agentNameSnapshot?: string | null;
   /** Optional trace id for event correlation. */
   traceId?: string;
 }
@@ -114,8 +116,9 @@ function buildProcessingEvent(
     schemaVersion: "0.1.0",
     eventType: "tools/call",
     actionType: toolName,
-    ...(input.agentId != null && input.agentId !== "" && { agentId: input.agentId }),
-    ...(input.traceId != null && input.traceId !== "" && { traceId: input.traceId }),
+    agentNameSnapshot: input.agentNameSnapshot ?? undefined,
+    agentId: input.agentId ?? undefined,
+    traceId: input.traceId ?? undefined,
     targetResource: toolName,
     decision: outcome.decision,
     policyEvaluation:
@@ -159,7 +162,7 @@ async function emitProcessingEvent(
  * When eventSinks are provided, emits a GuardioEvent describing the processing result.
  */
 export async function processMessage(input: ProcessInput): Promise<ProcessResult> {
-  const { body, policyPlugins, eventSinks = [] } = input;
+  const { body, policyPlugins, eventSinks = [], agentNameSnapshot } = input;
 
   let request: JsonRpcRequest;
   try {

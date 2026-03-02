@@ -275,6 +275,7 @@ export interface DashboardActivityEvent {
   eventType: string;
   actionType?: string | null;
   agentId?: string | null;
+  agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string; code?: string; reason?: string } | null;
 }
