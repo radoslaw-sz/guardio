@@ -9,6 +9,7 @@ export interface StorageConnectionResult {
 
 import type { CoreRepository } from "./CoreRepository.js";
 import type { EventSinkRepository } from "./EventSinkRepository.js";
+import type { PluginRepository } from "./PluginRepository.js";
 
 /**
  * Storage adapter interface for database lifecycle: schema setup, connect, disconnect, teardown.
@@ -34,6 +35,13 @@ export interface StorageAdapter {
    * Optional: return a repository for persisting GuardioEvent. When implemented, event-sink plugins can use it.
    */
   getEventSinkRepository?(): EventSinkRepository | undefined;
+
+  /**
+   * Optional: return a scoped PluginRepository for plugin-specific data storage.
+   * The returned repository is scoped to the given pluginId, automatically filtering all operations.
+   * @param pluginId The plugin identifier (typically plugin.name)
+   */
+  getPluginRepository?(pluginId: string): PluginRepository | undefined;
 
   /**
    * Create tables / schema. Called after connect.

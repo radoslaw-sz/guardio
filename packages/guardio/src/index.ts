@@ -19,6 +19,7 @@ export {
 export type {
   PolicyPluginFactory,
   PolicyPluginDescriptor,
+  PolicyPluginDefinition,
   StoragePluginFactory,
   GuardioConfig,
   GuardioServerConfig,
@@ -40,6 +41,11 @@ export type {
   PolicyRequestContext,
   PolicyResult,
   PolicyVerdict,
+  PluginRepository,
+  PluginDocument,
+  PluginDocumentFilter,
+  EventSinkPluginContext,
+  PolicyPluginContext,
 } from "./interfaces/index.js";
 export {
   DenyToolAccessPolicyPlugin,
@@ -47,6 +53,10 @@ export {
   DenyRegexParameterPolicyPlugin,
   type DenyRegexParameterPolicyPluginConfig,
   type DenyRegexParameterRule,
+  RateLimitToolPolicyPlugin,
+  RATE_LIMIT_TOOL_UI_SCHEMA,
+  rateLimitToolConfigSchema,
+  type RateLimitToolPolicyPluginConfig,
 } from "./plugins/policy/index.js";
 export { DefaultNotificationPlugin } from "./plugins/notification/index.js";
 export {

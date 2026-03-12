@@ -4,6 +4,7 @@ import type {
   PolicyRequestContext,
   PolicyResult,
 } from "../../interfaces/index.js";
+import type { PolicyPluginDefinition } from "../../config/plugin-types.js";
 import { logger } from "../../logger.js";
 
 const denyRegexParameterRuleSchema = z.object({
@@ -128,3 +129,10 @@ export class DenyRegexParameterPolicyPlugin implements PolicyPluginInterface {
     return { verdict: "allow" };
   }
 }
+
+export const denyRegexParameterDefinition: PolicyPluginDefinition = {
+  name: "deny-regex-parameter",
+  factory: (config) => new DenyRegexParameterPolicyPlugin(config),
+  configSchema: denyRegexParameterConfigSchema,
+  uiSchema: DENY_REGEX_PARAMETER_UI_SCHEMA,
+};

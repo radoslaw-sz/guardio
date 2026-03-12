@@ -80,6 +80,12 @@ export interface GuardioClientConfig {
   /** Host to bind. Default "127.0.0.1". Use "0.0.0.0" for external connections. */
   host?: string;
   /**
+   * Client transport type.
+   * - "http": Fastify-based HTTP server exposing /:mcpId/sse and /:mcpId/messages (default).
+   * - "stdio": (experimental) stdin/stdout-based client transport.
+   */
+  type?: "http" | "stdio";
+  /**
    * @deprecated Guardio is HTTP-only; mode is ignored. Use port/host to configure the server.
    */
   mode?: "http";

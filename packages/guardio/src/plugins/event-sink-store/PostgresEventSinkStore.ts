@@ -1,11 +1,10 @@
 import type { EventSinkStorePluginInterface } from "../../interfaces/EventSinkStorePluginInterface.js";
 import type { StoredEvent } from "../../interfaces/EventSinkRepository.js";
-import type { GuardioPluginContext } from "../../interfaces/GuardioPluginContext.js";
+import type { EventSinkPluginContext } from "../../interfaces/EventSinkPluginContext.js";
 
 /**
- * EventSinkStore that fetches events from the database via the storage adapter's
- * EventSinkRepository.list(). Requires context.storage with getEventSinkRepository()
- * that implements list(); otherwise returns [].
+ * EventSinkStore that fetches events from the database via EventSinkRepository.list().
+ * Requires context.eventSinkRepository that implements list(); otherwise returns [].
  * Use with the "postgres" storage plugin so events are read from PostgreSQL.
  */
 export class PostgresEventSinkStore implements EventSinkStorePluginInterface {
@@ -13,11 +12,11 @@ export class PostgresEventSinkStore implements EventSinkStorePluginInterface {
 
   constructor(
     _config?: Record<string, unknown>,
-    private readonly context?: GuardioPluginContext,
+    private readonly context?: EventSinkPluginContext,
   ) {}
 
   async listEvents(options?: { limit?: number }): Promise<StoredEvent[]> {
-    const repo = this.context?.storage?.getEventSinkRepository?.();
+    const repo = this.context?.eventSinkRepository;
     if (!repo?.list) return [];
     return repo.list(options ?? {});
   }

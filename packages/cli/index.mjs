@@ -184,7 +184,7 @@ async function main() {
       guardio:
         "node --import tsx ./node_modules/@guardiojs/guardio/dist/cli.js --config guardio.config.ts",
     },
-    dependencies: { "@guardiojs/guardio": "*" },
+    dependencies: { "@guardiojs/guardio": "*", zod: "^3.23.0" },
     devDependencies: {
       typescript: "^5.6.0",
       "@types/node": "^22.0.0",
@@ -238,27 +238,59 @@ export default config;
 
   if (addExamplePlugin) {
     await mkdir(resolve(guardioPath, "plugins", "example"), { recursive: true });
-    const examplePluginContent = `import type {
+    const examplePluginContent = `import { z } from "zod";
+import type {
+  PolicyPluginDefinition,
   PolicyPluginInterface,
   PolicyRequestContext,
   PolicyResult,
+  PolicyPluginContext,
 } from "@guardiojs/guardio";
+
+// Config schema for dashboard validation (optional)
+const configSchema = z.object({
+  allowAll: z.boolean().default(true).describe("Allow all tool calls"),
+});
+
+type Config = z.infer<typeof configSchema>;
 
 /**
  * Example policy plugin: implements PolicyPluginInterface.
  * Reference in guardio.config.ts with: { type: "policy", name: "example", path: "./plugins/example" }
- * Default export must be the plugin instance.
  */
 class ExamplePolicyPlugin implements PolicyPluginInterface {
   readonly name = "example";
 
-  async evaluate(context: PolicyRequestContext): Promise<PolicyResult> {
-    // Example: allow all calls. Replace with your policy logic.
-    return Promise.resolve({ verdict: "allow" });
+  constructor(
+    private config: Config,
+    private context?: PolicyPluginContext,
+  ) {}
+
+  async evaluate(ctx: PolicyRequestContext): Promise<PolicyResult> {
+    // Access config: this.config.allowAll
+    // Access plugin storage: this.context?.pluginRepository
+    if (this.config.allowAll) {
+      return { verdict: "allow" };
+    }
+    return {
+      verdict: "block",
+      code: "EXAMPLE_BLOCKED",
+      reason: "Blocked by example policy",
+    };
   }
 }
 
-export default new ExamplePolicyPlugin();
+// Export a PolicyPluginDefinition (factory-based)
+const definition: PolicyPluginDefinition = {
+  name: "example",
+  factory: (config, context) => new ExamplePolicyPlugin(config as Config, context),
+  configSchema,
+  uiSchema: {
+    allowAll: { "ui:widget": "checkbox" },
+  },
+};
+
+export default definition;
 `;
     await writeFile(
       resolve(guardioPath, "plugins", "example", "index.ts"),
@@ -272,10 +304,33 @@ export default new ExamplePolicyPlugin();
 
 Add a plugin by setting \`path\` in \`guardio.config.ts\` to a directory that contains \`index.js\` or \`index.mjs\` (compile from \`index.ts\` with \`npm run build\`).
 
-- The directory must have \`index.js\` or \`index.mjs\` whose **default export is the plugin instance** (no descriptor).
-- Policy: implement \`PolicyPluginInterface\` (name, evaluate returning Promise<PolicyResult>). Config: \`{ "type": "policy", "name": "my-policy", "path": "./plugins/my-policy" }\`.
+## Policy plugins
 
-Import types from "@guardiojs/guardio".${addExamplePlugin ? " See example/ for a policy plugin." : ""}
+Export a \`PolicyPluginDefinition\` with a factory function:
+
+\`\`\`ts
+import { z } from "zod";
+import type { PolicyPluginDefinition } from "@guardiojs/guardio";
+
+const configSchema = z.object({ ... });
+
+const definition: PolicyPluginDefinition = {
+  name: "my-policy",
+  factory: (config, context) => new MyPolicyPlugin(config, context),
+  configSchema,  // optional: enables dashboard validation
+  uiSchema: {},  // optional: custom form widgets
+};
+
+export default definition;
+\`\`\`
+
+Config: \`{ "type": "policy", "name": "my-policy", "path": "./plugins/my-policy" }\`
+
+Custom plugins work exactly like built-in plugins:
+- Create multiple instances with different configs via the dashboard
+- Configs are stored in the database and validated against your schema
+- Plugins receive a \`PolicyPluginContext\` with a scoped \`PluginRepository\` for persisting state
+${addExamplePlugin ? "\nSee example/ for a complete policy plugin." : ""}
 `;
   await writeFile(
     resolve(guardioPath, "plugins", "README.md"),

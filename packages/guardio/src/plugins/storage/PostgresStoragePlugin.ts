@@ -9,9 +9,15 @@ import type {
   EventSinkRepository,
   StoredEvent,
 } from "../../interfaces/EventSinkRepository.js";
+import type {
+  PluginRepository,
+  PluginDocument,
+  PluginDocumentFilter,
+} from "../../interfaces/PluginRepository.js";
 import type { GuardioEvent } from "../../interfaces/EventSinkPluginInterface.js";
 import { PostgresCoreRepository } from "./PostgresCoreRepository.js";
 import { logger } from "../../logger.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Configuration for the PostgreSQL storage plugin.
@@ -138,6 +144,18 @@ CREATE TABLE IF NOT EXISTS guardio_events (
   error_code           TEXT,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Plugin data storage (for policy plugins to store custom data)
+CREATE TABLE IF NOT EXISTS plugin_data (
+  id              TEXT PRIMARY KEY,
+  plugin_id       VARCHAR(100) NOT NULL,
+  context_key     VARCHAR(255),
+  data            JSONB NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_data_lookup ON plugin_data(plugin_id, context_key);
 `;
 
 function jsonOrNull(value: unknown): unknown {
@@ -217,6 +235,144 @@ class PostgresEventSinkRepository implements EventSinkRepository {
 }
 
 /**
+ * PostgreSQL implementation of PluginRepository.
+ * Scoped to a specific pluginId - all operations are automatically filtered.
+ */
+class PostgresPluginRepository implements PluginRepository {
+  constructor(
+    private readonly pool: Pool,
+    private readonly pluginId: string,
+  ) {}
+
+  async saveDocument(
+    contextKey: string,
+    data: Record<string, unknown>,
+    id?: string,
+  ): Promise<string> {
+    const docId = id ?? randomUUID();
+    await this.pool.query(
+      `INSERT INTO plugin_data (id, plugin_id, context_key, data, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, now(), now())
+       ON CONFLICT (id) DO UPDATE SET
+         data = EXCLUDED.data,
+         updated_at = now()`,
+      [docId, this.pluginId, contextKey, data],
+    );
+    return docId;
+  }
+
+  async getDocument(contextKey: string): Promise<PluginDocument | null> {
+    const result = await this.pool.query(
+      `SELECT id, context_key AS "contextKey", data, 
+              created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM plugin_data
+       WHERE plugin_id = $1 AND context_key = $2
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [this.pluginId, contextKey],
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as {
+      id: string;
+      contextKey: string;
+      data: Record<string, unknown>;
+      createdAt: Date;
+      updatedAt: Date;
+    };
+    return {
+      id: row.id,
+      contextKey: row.contextKey,
+      data: row.data,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async listDocuments(contextKey?: string): Promise<PluginDocument[]> {
+    let query = `SELECT id, context_key AS "contextKey", data,
+                        created_at AS "createdAt", updated_at AS "updatedAt"
+                 FROM plugin_data
+                 WHERE plugin_id = $1`;
+    const params: unknown[] = [this.pluginId];
+
+    if (contextKey !== undefined) {
+      query += ` AND context_key = $2`;
+      params.push(contextKey);
+    }
+    query += ` ORDER BY updated_at DESC`;
+
+    const result = await this.pool.query(query, params);
+    return result.rows.map(
+      (row: {
+        id: string;
+        contextKey: string;
+        data: Record<string, unknown>;
+        createdAt: Date;
+        updatedAt: Date;
+      }) => ({
+        id: row.id,
+        contextKey: row.contextKey,
+        data: row.data,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      }),
+    );
+  }
+
+  async queryDocuments(filter: PluginDocumentFilter): Promise<PluginDocument[]> {
+    let query = `SELECT id, context_key AS "contextKey", data,
+                        created_at AS "createdAt", updated_at AS "updatedAt"
+                 FROM plugin_data
+                 WHERE plugin_id = $1`;
+    const params: unknown[] = [this.pluginId];
+    let paramIndex = 2;
+
+    if (filter.contextKey !== undefined) {
+      if (filter.contextKey.includes("%")) {
+        query += ` AND context_key LIKE $${paramIndex}`;
+      } else {
+        query += ` AND context_key = $${paramIndex}`;
+      }
+      params.push(filter.contextKey);
+      paramIndex++;
+    }
+
+    if (filter.dataFilter !== undefined) {
+      query += ` AND data @> $${paramIndex}`;
+      params.push(JSON.stringify(filter.dataFilter));
+      paramIndex++;
+    }
+
+    query += ` ORDER BY updated_at DESC`;
+
+    const result = await this.pool.query(query, params);
+    return result.rows.map(
+      (row: {
+        id: string;
+        contextKey: string;
+        data: Record<string, unknown>;
+        createdAt: Date;
+        updatedAt: Date;
+      }) => ({
+        id: row.id,
+        contextKey: row.contextKey,
+        data: row.data,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      }),
+    );
+  }
+
+  async deleteDocument(id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `DELETE FROM plugin_data WHERE id = $1 AND plugin_id = $2`,
+      [id, this.pluginId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+}
+
+/**
  * Built-in storage adapter using PostgreSQL. Creates resource_providers, provider_capabilities,
  * agents, connections, policy_instances, policy_assignments, and guardio_events tables.
  * Uses JSONB for JSON columns, BOOLEAN for flags, TIMESTAMPTZ for timestamps.
@@ -282,6 +438,11 @@ export class PostgresStoragePlugin implements StorageAdapter {
 
   getEventSinkRepository(): EventSinkRepository | undefined {
     return this._eventSinkRepository ?? undefined;
+  }
+
+  getPluginRepository(pluginId: string): PluginRepository | undefined {
+    if (!this.pool) return undefined;
+    return new PostgresPluginRepository(this.pool, pluginId);
   }
 
   async disconnect(): Promise<void> {

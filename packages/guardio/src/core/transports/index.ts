@@ -21,4 +21,7 @@ export {
   createClientTransport,
   type CreateClientTransportOptions,
 } from "./create-client-transport.js";
-export { createServerTransport } from "./create-server-transport.js";
+export {
+  createServerTransport,
+  registerServerTransport,
+} from "./create-server-transport.js";

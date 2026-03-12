@@ -5,11 +5,12 @@ export {
   getPolicyConfigSchema,
   createPolicyPluginInstance,
 } from "./PluginManager.js";
+export type { StoragePluginFactory } from "./PluginManager.js";
 export type {
   PolicyPluginFactory,
   PolicyPluginDescriptor,
-  StoragePluginFactory,
-} from "./PluginManager.js";
+  PolicyPluginDefinition,
+} from "./plugin-types.js";
 export type {
   GuardioConfig,
   GuardioServerConfig,

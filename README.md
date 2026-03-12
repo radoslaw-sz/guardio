@@ -65,7 +65,7 @@ Point your AI Agent or MCP client at `http://127.0.0.1:<port>`. If you installed
 
 ### AI Agent connection
 
-AI Agents (MCP clients) connect to **Guardio’s HTTP server**, not directly to the upstream MCP servers. Guardio is the single entry point.
+AI Agents (MCP clients) connect to **Guardio's HTTP server**, not directly to the upstream MCP servers. Guardio is the single entry point.
 
 - **SSE (stream)** – Connect to `http://<host>:<port>/{serverName}/sse` for the MCP SSE stream. Use the **server name** from your config (e.g. `nuvei-docs` → `/nuvei-docs/sse`).
 - **Optional `x-agent-name`** – Send this header on the SSE connection to give the agent a human-readable name. If omitted, Guardio generates one. The connection is assigned an agent id used for policy scoping.
@@ -75,16 +75,16 @@ So: one Guardio URL base, multiple paths like `/{mcp-tool}/sse` and `/{mcp-tool}
 
 ### MCP tool connection
 
-In your config you define a **`servers`** array. Each entry has a **`name`** (unique, used in the URL path) and an **`url`** (the upstream MCP server’s HTTP/SSE base URL). Guardio proxies:
+In your config you define a **`servers`** array. Each entry has a **`name`** (unique, used in the URL path) and an **`url`** (the upstream MCP server's HTTP/SSE base URL). Guardio proxies:
 
 - **GET /{name}/sse** – to the upstream SSE endpoint (and manages the stream).
 - **POST /{name}/messages** – to the upstream after running policies (or returns a blocked result without forwarding).
 
-So each “MCP tool” or upstream is one entry in `servers`; a single Guardio instance serves all of them.
+So each "MCP tool" or upstream is one entry in `servers`; a single Guardio instance serves all of them.
 
 ### Plugins
 
-Plugins extend Guardio’s behavior. Types:
+Plugins extend Guardio's behavior. Types:
 
 | Type               | Role                                                                                                                   |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
@@ -104,26 +104,53 @@ You register plugins in **`guardio.config.ts`** in the **`plugins`** array. Poli
 
 ### Create a custom plugin
 
-Use a **path-based** plugin: in config add an entry with **`path`** pointing to a directory that contains **`index.js`** or **`index.mjs`** (build from `index.ts` if needed). The module’s **default export must be the plugin instance**.
+Use a **path-based** plugin: in config add an entry with **`path`** pointing to a directory that contains **`index.js`** or **`index.mjs`** (build from `index.ts` if needed).
 
-Example for a custom policy:
+Export a **`PolicyPluginDefinition`** with a factory function. This enables full dashboard integration: runtime configuration, multiple instances, config validation, and custom form widgets.
 
 ```ts
 // plugins/my-policy/index.ts
+import { z } from "zod";
 import type {
+  PolicyPluginDefinition,
   PolicyPluginInterface,
   PolicyRequestContext,
   PolicyResult,
+  PolicyPluginContext,
 } from "@guardiojs/guardio";
+
+// Config schema for dashboard validation
+const configSchema = z.object({
+  maxLength: z.number().min(1).describe("Maximum argument length"),
+  blockedPatterns: z.array(z.string()).optional(),
+});
+
+type Config = z.infer<typeof configSchema>;
 
 class MyPolicyPlugin implements PolicyPluginInterface {
   readonly name = "my-policy";
-  async evaluate(context: PolicyRequestContext): Promise<PolicyResult> {
-    // allow | block | modify args
-    return Promise.resolve({ verdict: "allow" });
+  constructor(
+    private config: Config,
+    private context?: PolicyPluginContext,
+  ) {}
+
+  async evaluate(ctx: PolicyRequestContext): Promise<PolicyResult> {
+    // Access config: this.config.maxLength
+    // Access plugin storage: this.context?.pluginRepository
+    return { verdict: "allow" };
   }
 }
-export default new MyPolicyPlugin();
+
+const definition: PolicyPluginDefinition = {
+  name: "my-policy",
+  factory: (config, context) => new MyPolicyPlugin(config as Config, context),
+  configSchema,
+  uiSchema: {
+    maxLength: { "ui:widget": "updown" },
+  },
+};
+
+export default definition;
 ```
 
 In config:
@@ -132,7 +159,12 @@ In config:
 { type: "policy", name: "my-policy", path: "./plugins/my-policy" }
 ```
 
-If you chose “Add example custom policy plugin” when running `npx create-guardio`, see the generated `plugins/example` folder.
+Custom plugins work exactly like built-in plugins:
+- Create multiple instances with different configs via the dashboard
+- Configs are stored in the database and validated against your schema
+- Plugins receive a `PolicyPluginContext` with a scoped `PluginRepository` for persisting plugin-specific state
+
+If you chose "Add example custom policy plugin" when running `npx create-guardio`, see the generated `plugins/example` folder.
 
 ---
 
@@ -143,8 +175,8 @@ If you chose “Add example custom policy plugin” when running `npx create-gua
 When a **`tools/call`** request hits Guardio (POST `/{serverName}/messages`):
 
 1. Guardio resolves which **policy plugins** apply (from storage, optionally scoped by agent and tool).
-2. Each policy’s **`evaluate`** is run with the tool name and arguments.
-3. If any policy returns **block**, the call is **not** forwarded. Guardio responds with a **success** JSON-RPC result that includes a human-readable message and **`_guardio`** metadata (so agent frameworks don’t treat it as a fatal error).
+2. Each policy's **`evaluate`** is run with the tool name and arguments.
+3. If any policy returns **block**, the call is **not** forwarded. Guardio responds with a **success** JSON-RPC result that includes a human-readable message and **`_guardio`** metadata (so agent frameworks don't treat it as a fatal error).
 4. If all policies **allow**, the request (with any **modified arguments**) is forwarded to the upstream MCP server and the response is proxied back.
 
 Non–`tools/call` messages are forwarded without policy evaluation.
@@ -180,7 +212,7 @@ Blocked tool calls return a **success** result with **`result.isError: true`** a
 </p>
 
 
-The **dashboard** is a Next.js web UI for Guardio. It lets you view activity (allowed/blocked tool calls), manage policies, and inspect agents and topology. You can add it when scaffolding with `npx create-guardio` (choose “Install dashboard?”).
+The **dashboard** is a Next.js web UI for Guardio. It lets you view activity (allowed/blocked tool calls), manage policies, and inspect agents and topology. You can add it when scaffolding with `npx create-guardio` (choose "Install dashboard?").
 
 ---
 

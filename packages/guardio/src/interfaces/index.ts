@@ -11,3 +11,10 @@ export type {
   PolicyAssignmentWithPlugin,
 } from "./CoreRepository.js";
 export type { PolicyRequestContext, PolicyResult, PolicyVerdict } from "./PolicyTypes.js";
+export type {
+  PluginRepository,
+  PluginDocument,
+  PluginDocumentFilter,
+} from "./PluginRepository.js";
+export type { EventSinkPluginContext } from "./EventSinkPluginContext.js";
+export type { PolicyPluginContext } from "./PolicyPluginContext.js";

@@ -41,6 +41,10 @@ const config: GuardioConfig = {
       type: "policy",
       name: "deny-regex-parameter",
     },
+    {
+      type: "policy",
+      name: "rate-limit-tool",
+    },
   ],
 };
 

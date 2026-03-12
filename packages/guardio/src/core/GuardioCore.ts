@@ -1,36 +1,29 @@
-import type { PolicyPluginInterface } from "../interfaces/PolicyPluginInterface.js";
 import type { GuardioCoreConfig } from "./types.js";
 import type { JsonRpcRequest } from "./types.js";
-import {
-  getPolicyConfigSchema,
-  createPolicyPluginInstance,
-  PluginManager,
-} from "../config/PluginManager.js";
+import { PluginManager } from "../config/PluginManager.js";
 import {
   createServerTransport,
   createClientTransport,
   type IServerTransport,
   type IClientTransport,
 } from "./transports/index.js";
-import { fetchToolsListViaDiscovery } from "./transports/mcp-tools-discovery.js";
 import type {
   DashboardConnectionInfo,
-  DashboardMcpToolInfo,
   DashboardPoliciesInfo,
   DashboardPolicyEntry,
   DashboardPolicyInstance,
   DashboardPolicyInstancesInfo,
   DashboardEventsInfo,
 } from "./transports/dashboard-api-types.js";
-import type {
-  CreatePolicyInstanceBody,
-  CreatePolicyInstanceResult,
-  UpdatePolicyInstanceBody,
-  UpdatePolicyInstanceResult,
-} from "./transports/types.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { processMessage } from "./Processor.js";
 import { logger } from "../logger.js";
+import { ToolsDiscoveryService } from "./services/tools-discovery-service.js";
+import { buildConnectionInfo } from "./services/connection-info-service.js";
+import { PolicyInstanceService } from "./services/policy-instance-service.js";
+import { listEventsForDashboard } from "./services/events-query-service.js";
+import { instantiatePolicyPlugins } from "./services/policy-instantiation.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { CreatePolicyInstanceBody, CreatePolicyInstanceResult, UpdatePolicyInstanceBody, UpdatePolicyInstanceResult } from "./transports/types.js";
 
 export class GuardioCore {
   private readonly config: GuardioCoreConfig;
@@ -38,16 +31,18 @@ export class GuardioCore {
 
   private serverTransports = new Map<string, IServerTransport>();
   private clientTransport: IClientTransport | null = null;
-  /** Cached tools per server, filled when we proxy a tools/list response from the agent. */
-  private readonly toolsListCache = new Map<string, DashboardMcpToolInfo[]>();
-  /** One discovery per URL so multiple servers pointing to the same MCP don't open concurrent connections. */
-  private readonly discoveryInProgressByUrl = new Map<
-    string,
-    Promise<DashboardMcpToolInfo[] | null>
-  >();
+  private readonly toolsDiscovery: ToolsDiscoveryService;
+  private readonly policyInstanceService: PolicyInstanceService;
 
   constructor(config: GuardioCoreConfig) {
     this.config = config;
+    this.toolsDiscovery = new ToolsDiscoveryService(
+      this.config.servers,
+      this.config.coreRepository,
+    );
+    this.policyInstanceService = new PolicyInstanceService(
+      this.config.coreRepository,
+    );
   }
 
   async run(): Promise<void> {
@@ -83,22 +78,8 @@ export class GuardioCore {
       await transport.start();
     }
     await this.clientTransport.start();
-    await this.loadPersistedServerTools();
+    await this.toolsDiscovery.loadPersistedServerTools();
     logger.info("Core started");
-  }
-
-  /** Load persisted tools from storage into cache so dashboard shows last-known after restart. */
-  private async loadPersistedServerTools(): Promise<void> {
-    const repo = this.config.coreRepository;
-    if (!repo.getAllServerTools) return;
-    try {
-      const all = await repo.getAllServerTools();
-      for (const [name, tools] of Object.entries(all)) {
-        if (tools?.length) this.toolsListCache.set(name, tools);
-      }
-    } catch (err) {
-      logger.debug({ err }, "Load persisted server tools failed");
-    }
   }
 
   /** Returns the client transport after run(); used by the server to attach subscribers. */
@@ -164,40 +145,14 @@ export class GuardioCore {
 
     for (const [serverName, transport] of this.serverTransports) {
       transport.on("message", (line: string) => {
-        this.tryCacheToolsFromSseMessage(line, serverName);
+        this.toolsDiscovery.handleSseMessage(line, serverName);
         this.clientTransport?.send(line, serverName);
       });
       transport.on("endpointReady", () => {
-        this.toolsListCache.delete(serverName);
         if (typeof this.clientTransport?.setRemoteReady === "function") {
           this.clientTransport.setRemoteReady(serverName);
         }
-        const serverConfig = this.config.servers.find(
-          (s) => s.name === serverName,
-        );
-        if (!serverConfig) return;
-        const url = serverConfig.url.trim();
-        this.rehydrateServerToolsFromDb(url);
-        let promise = this.discoveryInProgressByUrl.get(url);
-        if (!promise) {
-          promise = fetchToolsListViaDiscovery(serverConfig).finally(() => {
-            this.discoveryInProgressByUrl.delete(url);
-          });
-          this.discoveryInProgressByUrl.set(url, promise);
-        }
-        promise
-          .then((tools) => {
-            if (tools !== null) {
-              const save = this.config.coreRepository.saveServerTools;
-              for (const s of this.config.servers) {
-                if (s.url.trim() === url) {
-                  this.toolsListCache.set(s.name, tools);
-                  save?.(s.name, tools).catch(() => {});
-                }
-              }
-            }
-          })
-          .catch(() => {});
+        this.toolsDiscovery.handleEndpointReady(serverName);
       });
     }
   }
@@ -206,230 +161,44 @@ export class GuardioCore {
     this.clientTransport?.send(message, serverName);
   }
 
-  /** Normalize raw MCP tool list to DashboardMcpToolInfo[]. */
-  private normalizeToolsList(tools: unknown[]): DashboardMcpToolInfo[] {
-    return tools.map((t) =>
-      typeof t === "object" &&
-      t !== null &&
-      typeof (t as { name?: unknown }).name === "string"
-        ? {
-            name: (t as { name: string }).name,
-            description: (t as { description?: string }).description,
-            title: (t as { title?: string }).title,
-            inputSchema:
-              typeof (t as { inputSchema?: unknown }).inputSchema ===
-                "object" && (t as { inputSchema?: object }).inputSchema !== null
-                ? (t as { inputSchema: object }).inputSchema
-                : undefined,
-          }
-        : { name: String(t) },
-    );
-  }
-
-  /**
-   * If the message is a JSON-RPC response with result.tools (e.g. from SSE after 202 Accepted),
-   * cache it for connection info. No-op if not valid or not a tools list response.
-   */
-  private tryCacheToolsFromSseMessage(line: string, serverName: string): void {
-    try {
-      const json = JSON.parse(line) as { result?: { tools?: unknown[] } };
-      const tools = json.result?.tools;
-      if (!Array.isArray(tools)) return;
-      const normalized = this.normalizeToolsList(tools);
-      this.toolsListCache.set(serverName, normalized);
-      this.config.coreRepository
-        .saveServerTools?.(serverName, normalized)
-        .catch(() => {});
-    } catch {
-      // not JSON or wrong shape; ignore
-    }
-  }
-
-  /** Rehydrate tools from DB for all servers with this URL so dashboard shows last-known until discovery completes. */
-  private rehydrateServerToolsFromDb(url: string): void {
-    const repo = this.config.coreRepository;
-    if (!repo.getAllServerTools) return;
-    repo
-      .getAllServerTools()
-      .then((all) => {
-        for (const s of this.config.servers) {
-          if (s.url.trim() === url && all[s.name]?.length) {
-            this.toolsListCache.set(s.name, all[s.name]);
-          }
-        }
-      })
-      .catch(() => {});
-  }
-
   /** Dashboard GET /api/connection: build connection info from transports. */
   private async getConnectionInfo(): Promise<DashboardConnectionInfo | null> {
-    const client = this.clientTransport
-      ? {
-          mode: "http" as const,
-          listenPort: this.config.client?.port,
-          listenHost: this.config.client?.host,
-          activeSseClients: this.clientTransport.getActiveSseClients?.() ?? 0,
-          remoteReady: this.clientTransport.getRemoteReady?.() ?? false,
-        }
-      : null;
-    const servers = [...this.serverTransports.entries()].map(
-      ([name, transport]) => ({
-        name,
-        remoteUrl: transport.getRemoteUrl(),
-        remotePostUrl: transport.getRemotePostUrl(),
-        connected: !!transport.getRemotePostUrl(),
-        tools: this.toolsListCache.get(name),
-      }),
-    );
-    const clients = this.clientTransport?.getActiveClientsInfo
-      ? await this.clientTransport.getActiveClientsInfo()
-      : [];
-    const connections = clients.map((c) => ({
-      agentId: c.id,
-      serverName: c.serverName ?? "",
-      agentName: c.name,
-    }));
-    logger.debug(
-      {
-        clientsCount: clients.length,
-        connectionsCount: connections.length,
-        activeSseClients: client?.activeSseClients,
-      },
-      "getConnectionInfo",
-    );
-    return { client, servers, clients, connections };
+    return buildConnectionInfo({
+      clientConfig: this.config.client,
+      clientTransport: this.clientTransport,
+      serverTransports: this.serverTransports,
+      coreRepository: this.config.coreRepository,
+      toolsByServer: (name) => this.toolsDiscovery.getToolsForServer(name),
+    });
   }
 
   /** GET /api/policy-instances: list policy instances from storage with assignment summary. */
   private async listPolicyInstances(): Promise<DashboardPolicyInstancesInfo | null> {
-    try {
-      const [instances, assignmentRows] = await Promise.all([
-        this.config.coreRepository.listPolicyInstances(),
-        this.config.coreRepository.listPolicyAssignmentRows(),
-      ]);
-      const byInstance = new Map<
-        string,
-        Array<{ agentId: string | null; toolName: string | null }>
-      >();
-      for (const row of assignmentRows) {
-        const list = byInstance.get(row.policyInstanceId) ?? [];
-        list.push({ agentId: row.agentId, toolName: row.toolName });
-        byInstance.set(row.policyInstanceId, list);
-      }
-      const instancesWithAssignments = instances.map((inst) => {
-        const assignments = byInstance.get(inst.id) ?? [];
-        return {
-          ...inst,
-          assignments,
-        };
-      });
-      return { instances: instancesWithAssignments };
-    } catch (err) {
-      logger.error({ err }, "listPolicyInstances failed");
-      return null;
-    }
+    return this.policyInstanceService.listPolicyInstances();
   }
 
   /** GET /api/events: list recent guardio_events for dashboard activity (via EventSinkStore plugin). */
   private async listEvents(): Promise<DashboardEventsInfo | null> {
-    const store = this.config.eventSinkStore;
-    if (!store) return null;
-    try {
-      const events = await store.listEvents({ limit: 500 });
-      return {
-        events: events.map((e) => ({
-          eventId: e.eventId,
-          timestamp: e.timestamp,
-          eventType: e.eventType,
-          actionType: e.actionType ?? null,
-          agentId: e.agentId ?? null,
-          agentNameSnapshot: e.agentNameSnapshot ?? null,
-          decision: e.decision ?? null,
-          policyEvaluation: e.policyEvaluation ?? null,
-        })),
-      };
-    } catch (err) {
-      logger.error({ err }, "listEvents failed");
-      return null;
-    }
+    return listEventsForDashboard(this.config.eventSinkStore);
   }
 
   /** POST /api/policy-instances: validate config and create a policy instance. */
   private async createPolicyInstance(
     body: CreatePolicyInstanceBody,
   ): Promise<CreatePolicyInstanceResult> {
-    const schema = getPolicyConfigSchema(body.pluginName);
-    let config: Record<string, unknown>;
-    if (schema) {
-      const parsed = schema.safeParse(body.config);
-      if (!parsed.success) {
-        return { error: parsed.error.message };
-      }
-      config = parsed.data as Record<string, unknown>;
-    } else {
-      try {
-        createPolicyPluginInstance(body.pluginName, {});
-      } catch (err) {
-        return {
-          error:
-            err instanceof Error
-              ? err.message
-              : `Unknown policy plugin: ${body.pluginName}`,
-        };
-      }
-      config =
-        body.config != null &&
-        typeof body.config === "object" &&
-        !Array.isArray(body.config)
-          ? (body.config as Record<string, unknown>)
-          : {};
-    }
-    try {
-      const id = await this.config.coreRepository.createPolicyInstance(
-        body.pluginName,
-        config,
-        body.name,
-        body.agentId,
-        body.toolName,
-      );
-      return { id };
-    } catch (err) {
-      logger.error(
-        { err, pluginName: body.pluginName },
-        "createPolicyInstance failed",
-      );
-      return {
-        error:
-          err instanceof Error
-            ? err.message
-            : "Failed to create policy instance",
-      };
-    }
+    return this.policyInstanceService.createPolicyInstance(body);
   }
 
   /** DELETE /api/policy-instances/:id: remove a policy instance and its assignments. */
   private async deletePolicyInstance(policyInstanceId: string): Promise<void> {
-    await this.config.coreRepository.deletePolicyInstance(policyInstanceId);
+    await this.policyInstanceService.deletePolicyInstance(policyInstanceId);
   }
 
   /** GET /api/policy-instances/:id: get one policy instance with assignments. */
   private async getPolicyInstance(
     id: string,
   ): Promise<DashboardPolicyInstance | null> {
-    try {
-      const instance =
-        await this.config.coreRepository.getPolicyInstanceById(id);
-      if (!instance) return null;
-      const assignmentRows =
-        await this.config.coreRepository.listPolicyAssignmentRows();
-      const assignments = assignmentRows
-        .filter((r) => r.policyInstanceId === id)
-        .map((r) => ({ agentId: r.agentId, toolName: r.toolName }));
-      return { ...instance, assignments };
-    } catch (err) {
-      logger.error({ err, id }, "getPolicyInstance failed");
-      return null;
-    }
+    return this.policyInstanceService.getPolicyInstance(id);
   }
 
   /** PATCH /api/policy-instances/:id: update config, name, and assignment. */
@@ -437,44 +206,7 @@ export class GuardioCore {
     id: string,
     body: UpdatePolicyInstanceBody,
   ): Promise<UpdatePolicyInstanceResult> {
-    const instance = await this.config.coreRepository.getPolicyInstanceById(id);
-    if (!instance) {
-      return { error: "Policy instance not found" };
-    }
-    const schema = getPolicyConfigSchema(instance.pluginId);
-    let config: Record<string, unknown>;
-    if (schema) {
-      const parsed = schema.safeParse(body.config);
-      if (!parsed.success) {
-        return { error: parsed.error.message };
-      }
-      config = parsed.data as Record<string, unknown>;
-    } else {
-      config =
-        body.config != null &&
-        typeof body.config === "object" &&
-        !Array.isArray(body.config)
-          ? (body.config as Record<string, unknown>)
-          : {};
-    }
-    try {
-      await this.config.coreRepository.updatePolicyInstance(
-        id,
-        config,
-        body.name,
-        body.agentId,
-        body.toolName,
-      );
-      return {};
-    } catch (err) {
-      logger.error({ err, id }, "updatePolicyInstance failed");
-      return {
-        error:
-          err instanceof Error
-            ? err.message
-            : "Failed to update policy instance",
-      };
-    }
+    return this.policyInstanceService.updatePolicyInstance(id, body);
   }
 
   /** Dashboard GET /api/policies: list policy plugin descriptors from config (names + config schemas). */
@@ -542,31 +274,15 @@ export class GuardioCore {
           agentId,
           toolName,
         );
-      const policyPlugins: PolicyPluginInterface[] = [];
-      for (const a of assignments) {
-        if (a.config == null || typeof a.config !== "object") {
-          logger.warn(
-            { assignmentId: a.id, pluginId: a.pluginId },
-            "Policy assignment has no config; skipping",
-          );
-          continue;
-        }
-        try {
-          policyPlugins.push(
-            createPolicyPluginInstance(
-              a.pluginId,
-              a.config as Record<string, unknown>,
-            ),
-          );
-        } catch (err) {
-          logger.warn(
-            { err, pluginId: a.pluginId, assignmentId: a.id },
-            "Failed to instantiate policy plugin for assignment; skipping",
-          );
-        }
-      }
 
       const cwd = this.config.cwd ?? process.cwd();
+      const storageAdapters = this.pluginManager
+        ? await this.pluginManager.getStoragePlugins(cwd, this.config.configPath)
+        : [];
+      const storageAdapter = storageAdapters[0];
+
+      const policyPlugins = instantiatePolicyPlugins(assignments, storageAdapter);
+
       const eventSinks = this.pluginManager
         ? await this.pluginManager.getEventSinkPlugins(
             cwd,
@@ -622,11 +338,10 @@ export class GuardioCore {
           const json = JSON.parse(text) as { result?: { tools?: unknown[] } };
           const tools = json.result?.tools;
           if (Array.isArray(tools)) {
-            const normalized = this.normalizeToolsList(tools as unknown[]);
-            this.toolsListCache.set(serverName, normalized);
-            this.config.coreRepository
-              .saveServerTools?.(serverName, normalized)
-              .catch(() => {});
+            const normalized = this.toolsDiscovery.normalizeToolsList(
+              tools as unknown[],
+            );
+            this.toolsDiscovery.setToolsForServer(serverName, normalized);
           }
         } catch {
           // not JSON or wrong shape; response still forwarded to client

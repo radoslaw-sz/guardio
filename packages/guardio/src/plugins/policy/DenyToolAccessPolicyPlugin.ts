@@ -3,6 +3,7 @@ import type {
   PolicyRequestContext,
   PolicyResult,
 } from "../../interfaces/index.js";
+import type { PolicyPluginDefinition } from "../../config/plugin-types.js";
 import { logger } from "../../logger.js";
 
 /**
@@ -41,3 +42,9 @@ export class DenyToolAccessPolicyPlugin implements PolicyPluginInterface {
     };
   }
 }
+
+export const denyToolAccessDefinition: PolicyPluginDefinition = {
+  name: "deny-tool-access",
+  factory: () => new DenyToolAccessPolicyPlugin(),
+  uiSchema: POLICY_SUMMARY_UI_SCHEMA,
+};

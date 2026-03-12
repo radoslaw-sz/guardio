@@ -1,6 +1,25 @@
-import type { GuardioServerConfigUrl } from "../../config/types.js";
+import type {
+  GuardioServerConfig,
+  GuardioServerConfigUrl,
+} from "../../config/types.js";
 import type { IServerTransport } from "./types.js";
 import { SseUrlTransport } from "./sse-url-transport.js";
+
+export type ServerTransportFactory = (
+  serverConfig: GuardioServerConfigUrl,
+) => IServerTransport;
+
+const serverTransportRegistry: Record<GuardioServerConfig["type"], ServerTransportFactory> =
+  {
+    url: (config: GuardioServerConfigUrl) => new SseUrlTransport(config),
+  };
+
+export function registerServerTransport(
+  type: GuardioServerConfig["type"],
+  factory: ServerTransportFactory,
+): void {
+  serverTransportRegistry[type] = factory;
+}
 
 /**
  * Creates a server transport from config.
@@ -9,5 +28,6 @@ import { SseUrlTransport } from "./sse-url-transport.js";
 export function createServerTransport(
   serverConfig: GuardioServerConfigUrl,
 ): IServerTransport {
-  return new SseUrlTransport(serverConfig);
+  const factory = serverTransportRegistry[serverConfig.type]!;
+  return factory(serverConfig);
 }

@@ -8,9 +8,15 @@ import type {
   EventSinkRepository,
   StoredEvent,
 } from "../../interfaces/EventSinkRepository.js";
+import type {
+  PluginRepository,
+  PluginDocument,
+  PluginDocumentFilter,
+} from "../../interfaces/PluginRepository.js";
 import type { GuardioEvent } from "../../interfaces/EventSinkPluginInterface.js";
 import { SqliteCoreRepository } from "./SqliteCoreRepository.js";
 import { logger } from "../../logger.js";
+import { randomUUID } from "node:crypto";
 
 export interface SqliteStoragePluginConfig {
   /** Path to the SQLite database file. Set this for file-based storage. */
@@ -99,6 +105,145 @@ class SqliteEventSinkRepository implements EventSinkRepository {
         event.httpStatus ?? null,
         event.errorCode ?? null,
       );
+  }
+}
+
+/**
+ * SQLite implementation of PluginRepository.
+ * Scoped to a specific pluginId - all operations are automatically filtered.
+ */
+class SqlitePluginRepository implements PluginRepository {
+  constructor(
+    private readonly db: Database.Database,
+    private readonly pluginId: string,
+  ) {}
+
+  async saveDocument(
+    contextKey: string,
+    data: Record<string, unknown>,
+    id?: string,
+  ): Promise<string> {
+    const docId = id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO plugin_data (id, plugin_id, context_key, data, created_at, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET
+           data = excluded.data,
+           updated_at = datetime('now')`,
+      )
+      .run(docId, this.pluginId, contextKey, JSON.stringify(data));
+    return docId;
+  }
+
+  async getDocument(contextKey: string): Promise<PluginDocument | null> {
+    const row = this.db
+      .prepare(
+        `SELECT id, context_key AS contextKey, data, created_at AS createdAt, updated_at AS updatedAt
+         FROM plugin_data
+         WHERE plugin_id = ? AND context_key = ?
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+      )
+      .get(this.pluginId, contextKey) as
+      | {
+          id: string;
+          contextKey: string;
+          data: string;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      contextKey: row.contextKey,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async listDocuments(contextKey?: string): Promise<PluginDocument[]> {
+    let query = `SELECT id, context_key AS contextKey, data, created_at AS createdAt, updated_at AS updatedAt
+                 FROM plugin_data
+                 WHERE plugin_id = ?`;
+    const params: unknown[] = [this.pluginId];
+
+    if (contextKey !== undefined) {
+      query += ` AND context_key = ?`;
+      params.push(contextKey);
+    }
+    query += ` ORDER BY updated_at DESC`;
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      id: string;
+      contextKey: string;
+      data: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      contextKey: row.contextKey,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async queryDocuments(filter: PluginDocumentFilter): Promise<PluginDocument[]> {
+    let query = `SELECT id, context_key AS contextKey, data, created_at AS createdAt, updated_at AS updatedAt
+                 FROM plugin_data
+                 WHERE plugin_id = ?`;
+    const params: unknown[] = [this.pluginId];
+
+    if (filter.contextKey !== undefined) {
+      if (filter.contextKey.includes("%")) {
+        query += ` AND context_key LIKE ?`;
+      } else {
+        query += ` AND context_key = ?`;
+      }
+      params.push(filter.contextKey);
+    }
+
+    query += ` ORDER BY updated_at DESC`;
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      id: string;
+      contextKey: string;
+      data: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+
+    let results = rows.map((row) => ({
+      id: row.id,
+      contextKey: row.contextKey,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    if (filter.dataFilter !== undefined) {
+      results = results.filter((doc) => {
+        for (const [key, value] of Object.entries(filter.dataFilter!)) {
+          if (doc.data[key] !== value) return false;
+        }
+        return true;
+      });
+    }
+
+    return results;
+  }
+
+  async deleteDocument(id: string): Promise<boolean> {
+    const result = this.db
+      .prepare(`DELETE FROM plugin_data WHERE id = ? AND plugin_id = ?`)
+      .run(id, this.pluginId);
+    return result.changes > 0;
   }
 }
 
@@ -241,6 +386,18 @@ export class SqliteStoragePlugin implements StorageAdapter {
           error_code           TEXT,
           created_at           TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        -- Plugin data storage (for policy plugins to store custom data)
+        CREATE TABLE IF NOT EXISTS plugin_data (
+          id              TEXT PRIMARY KEY,
+          plugin_id       TEXT NOT NULL,
+          context_key     TEXT,
+          data            TEXT NOT NULL,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_plugin_data_lookup ON plugin_data(plugin_id, context_key);
       `);
     logger.debug(this.logContext(), "SQLite storage tables created");
   }
@@ -271,6 +428,11 @@ export class SqliteStoragePlugin implements StorageAdapter {
 
   getEventSinkRepository(): EventSinkRepository | undefined {
     return this._eventSinkRepository ?? undefined;
+  }
+
+  getPluginRepository(pluginId: string): PluginRepository | undefined {
+    if (!this.db) return undefined;
+    return new SqlitePluginRepository(this.db, pluginId);
   }
 
   disconnect(): void {

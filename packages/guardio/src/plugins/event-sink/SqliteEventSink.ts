@@ -2,24 +2,23 @@ import type {
   EventSinkPluginInterface,
   GuardioEvent,
 } from "../../interfaces/EventSinkPluginInterface.js";
-import type { GuardioPluginContext } from "../../interfaces/GuardioPluginContext.js";
+import type { EventSinkPluginContext } from "../../interfaces/EventSinkPluginContext.js";
 import { logger } from "../../logger.js";
 
 /**
- * EventSink that persists GuardioEvent to the database via the storage adapter's
- * EventSinkRepository. Requires context.storage with getEventSinkRepository();
- * if missing, emit() is a no-op (logs at debug).
+ * EventSink that persists GuardioEvent to the database via EventSinkRepository.
+ * Requires context.eventSinkRepository; if missing, emit() is a no-op (logs at debug).
  */
 export class SqliteEventSink implements EventSinkPluginInterface {
   readonly name = "sqlite";
 
   constructor(
     _config?: Record<string, unknown>,
-    private readonly context?: GuardioPluginContext,
+    private readonly context?: EventSinkPluginContext,
   ) {}
 
   async emit(event: GuardioEvent): Promise<void> {
-    const repo = this.context?.storage?.getEventSinkRepository?.();
+    const repo = this.context?.eventSinkRepository;
     if (!repo) {
       logger.debug(
         { eventId: event.eventId },

@@ -1,6 +1,6 @@
 {
   "name": "@guardiojs/guardio",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "description": "Guardio is a proxy that sits between your AI Agent system and the external world",
   "type": "module",
   "main": "dist/index.js",
@@ -16,6 +16,8 @@
     "build": "tsc",
     "start": "node dist/cli.js",
     "dev": "NODE_ENV=development tsx watch src/cli.ts",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
     "guardio": "node bin/guardio.mjs",
     "create": "node create-guardio/index.mjs"
   },
@@ -45,6 +47,7 @@
     "@types/pg": "8.16.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
+    "vitest": "^4.0.18",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
