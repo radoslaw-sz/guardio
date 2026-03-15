@@ -1,0 +1,23 @@
+{
+  "name": "radoslaw-sz/guardio",
+  "description": "Guardio is a proxy that sits between your AI Agent system and the external world",
+  "accepts": [
+    {
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "address": "YOUR_WALLET_ADDRESS"
+    }
+  ],
+  "resources": [
+    {
+      "path": "/{name}/sse**",
+      "price": "0.01",
+      "description": "Pay-per-call access to /{name}/sse**"
+    },
+    {
+      "path": "/{name}/messages**",
+      "price": "0.01",
+      "description": "Pay-per-call access to /{name}/messages**"
+    }
+  ]
+}
