@@ -14,6 +14,9 @@ import type {
   DashboardPolicyInstance,
   DashboardPolicyInstancesInfo,
   DashboardEventsInfo,
+  DashboardSimulationSettings,
+  DashboardSimulationToolSetting,
+  UpdateSimulationSettingsBody,
 } from "./transports/dashboard-api-types.js";
 import { processMessage } from "./Processor.js";
 import { logger } from "../logger.js";
@@ -24,6 +27,7 @@ import { listEventsForDashboard } from "./services/events-query-service.js";
 import { instantiatePolicyPlugins } from "./services/policy-instantiation.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { CreatePolicyInstanceBody, CreatePolicyInstanceResult, UpdatePolicyInstanceBody, UpdatePolicyInstanceResult } from "./transports/types.js";
+import { SimulationService } from "./services/simulation-service.js";
 
 export class GuardioCore {
   private readonly config: GuardioCoreConfig;
@@ -33,6 +37,10 @@ export class GuardioCore {
   private clientTransport: IClientTransport | null = null;
   private readonly toolsDiscovery: ToolsDiscoveryService;
   private readonly policyInstanceService: PolicyInstanceService;
+  private readonly simulationService: SimulationService;
+
+  private static readonly GLOBAL_SETTINGS_SCOPE_TYPE = "global";
+  private static readonly GLOBAL_SETTINGS_SCOPE_ID = "global";
 
   constructor(config: GuardioCoreConfig) {
     this.config = config;
@@ -43,6 +51,7 @@ export class GuardioCore {
     this.policyInstanceService = new PolicyInstanceService(
       this.config.coreRepository,
     );
+    this.simulationService = new SimulationService();
   }
 
   async run(): Promise<void> {
@@ -66,6 +75,9 @@ export class GuardioCore {
         handleGetPolicyInstance: (id) => this.getPolicyInstance(id),
         handleUpdatePolicyInstance: (id, body) =>
           this.updatePolicyInstance(id, body),
+        handleGetSimulationSettings: () => this.getSimulationSettings(),
+        handleUpdateSimulationSettings: (body) =>
+          this.updateSimulationSettings(body),
       },
       serverNames,
       eventBus: this.config.eventBus,
@@ -122,19 +134,27 @@ export class GuardioCore {
 
     this.clientTransport.on(
       "postRequest",
-      async ({ body, reply, serverName, agentId, agentNameSnapshot }) => {
+      async ({
+        body,
+        reply,
+        serverName,
+        agentId,
+        agentNameSnapshot,
+        guardioMode,
+      }) => {
         try {
           const transport = this.serverTransports.get(serverName);
           if (!transport?.getRemotePostUrl()) {
             reply(503, "Remote MCP not ready");
             return;
           }
-          const result = await this.handlePostMessage(
+          const result = await this.handlePostMessage({
             body,
             serverName,
-            agentId ?? null,
-            agentNameSnapshot ?? null,
-          );
+            agentId: agentId ?? null,
+            agentNameSnapshot: agentNameSnapshot ?? null,
+            guardioMode: guardioMode ?? null,
+          });
           reply(result.status, result.body);
         } catch (err) {
           logger.error({ err }, "POST /messages failed");
@@ -242,15 +262,97 @@ export class GuardioCore {
     return { policies };
   }
 
+  /** GET /api/testing/simulation: read Simulation Mode configuration for dashboard. */
+  private async getSimulationSettings(): Promise<
+    DashboardSimulationSettings | null
+  > {
+    const repo = this.config.coreRepository;
+    if (!repo.getRuntimeSetting) return null;
+
+    const global = await repo.getRuntimeSetting(
+      "simulation_mode",
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+    );
+    const tools =
+      (await repo.getRuntimeSetting(
+        "simulation_tools",
+        GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+        GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+      )) as DashboardSimulationToolSetting[] | null;
+
+    const globalSimulated =
+      !!global &&
+      typeof global === "object" &&
+      (global as { enabled?: boolean }).enabled === true;
+
+    const settings: DashboardSimulationSettings = {
+      globalSimulated,
+      tools: Array.isArray(tools) ? tools : [],
+    };
+    return settings;
+  }
+
+  /** PUT /api/testing/simulation: update Simulation Mode configuration from dashboard. */
+  private async updateSimulationSettings(
+    body: UpdateSimulationSettingsBody,
+  ): Promise<{ error?: string }> {
+    const repo = this.config.coreRepository;
+    if (!repo.setRuntimeSetting) {
+      return { error: "Runtime settings are not supported by this storage" };
+    }
+
+    if (!Array.isArray(body.tools)) {
+      return { error: "tools must be an array" };
+    }
+
+    const seen = new Set<string>();
+    for (const entry of body.tools) {
+      if (
+        !entry ||
+        typeof entry.serverName !== "string" ||
+        typeof entry.toolName !== "string" ||
+        typeof entry.simulated !== "boolean"
+      ) {
+        return {
+          error:
+            "Each tool entry must include serverName (string), toolName (string), and simulated (boolean)",
+        };
+      }
+      const key = `${entry.serverName}::${entry.toolName}`;
+      if (seen.has(key)) {
+        return { error: "Duplicate serverName + toolName entries are not allowed" };
+      }
+      seen.add(key);
+    }
+
+    await repo.setRuntimeSetting(
+      "simulation_mode",
+      { enabled: body.globalSimulated === true },
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+    );
+    await repo.setRuntimeSetting(
+      "simulation_tools",
+      body.tools,
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+      GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+    );
+
+    return {};
+  }
+
   /**
    * Handle POST /messages (HTTP client): resolve policies from DB for context, run policy via Processor, then forward to remote if not handled.
    */
-  async handlePostMessage(
-    body: string,
-    serverName: string,
-    agentId: string | null = null,
-    agentNameSnapshot: string | null = null,
-  ): Promise<{ status: number; body: string }> {
+  async handlePostMessage(input: {
+    body: string;
+    serverName: string;
+    agentId: string | null;
+    agentNameSnapshot: string | null;
+    guardioMode: string | null;
+  }): Promise<{ status: number; body: string }> {
+    const { body, serverName, agentId, agentNameSnapshot, guardioMode } = input;
     const transport = this.serverTransports.get(serverName);
     const url = transport?.getRemotePostUrl() ?? null;
 
@@ -260,10 +362,11 @@ export class GuardioCore {
     }
     try {
       let toolName: string | null = null;
+      let parsedRequest: JsonRpcRequest | null = null;
       try {
-        const request = JSON.parse(body) as JsonRpcRequest;
-        if (request.method === "tools/call") {
-          toolName = request.params?.name ?? "(unknown)";
+        parsedRequest = JSON.parse(body) as JsonRpcRequest;
+        if (parsedRequest.method === "tools/call") {
+          toolName = parsedRequest.params?.name ?? "(unknown)";
         }
       } catch {
         // not JSON or missing params; forward as-is
@@ -285,10 +388,74 @@ export class GuardioCore {
 
       const eventSinks = this.pluginManager
         ? await this.pluginManager.getEventSinkPlugins(
-            cwd,
-            this.config.configPath,
-          )
+          cwd,
+          this.config.configPath,
+        )
         : [];
+
+      // Determine Simulation Mode state for this request (if any), so that
+      // processing events can be annotated consistently for both simulated
+      // and non-simulated environments.
+      const repo = this.config.coreRepository;
+      let simulationContext:
+        | {
+          enabled: boolean;
+          source: "global" | "header" | "tool";
+        }
+        | undefined;
+      if (repo.getRuntimeSetting && parsedRequest?.method === "tools/call") {
+        const runtimeSetting = await repo.getRuntimeSetting(
+          "simulation_mode",
+          GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+          GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+        );
+        const globalSimEnabled =
+          !!runtimeSetting &&
+          typeof runtimeSetting === "object" &&
+          (runtimeSetting as { enabled?: boolean }).enabled === true;
+        const headerSimEnabled =
+          !globalSimEnabled && guardioMode?.toLowerCase() === "simulation";
+
+        // Per-tool simulation override list (from dashboard settings).
+        let toolSimEnabled = false;
+        if (!globalSimEnabled && !headerSimEnabled && toolName) {
+          const toolsSetting = (await repo.getRuntimeSetting(
+            "simulation_tools",
+            GuardioCore.GLOBAL_SETTINGS_SCOPE_TYPE,
+            GuardioCore.GLOBAL_SETTINGS_SCOPE_ID,
+          )) as DashboardSimulationToolSetting[] | null;
+          if (Array.isArray(toolsSetting)) {
+            toolSimEnabled = toolsSetting.some(
+              (t) =>
+                t &&
+                t.serverName === serverName &&
+                t.toolName === toolName &&
+                t.simulated === true,
+            );
+          }
+        }
+
+        if (globalSimEnabled || headerSimEnabled || toolSimEnabled) {
+          simulationContext = {
+            enabled: true,
+            source: globalSimEnabled ? "global" : headerSimEnabled ? "header" : "tool",
+          };
+        }
+
+        logger.debug(
+          {
+            serverName,
+            toolName,
+            requestId: parsedRequest.id,
+            guardioMode,
+            globalSimEnabled,
+            headerSimEnabled,
+            toolSimEnabled,
+            simulationContext,
+          },
+          "Simulation gate evaluated",
+        );
+      }
 
       const processResult = await processMessage({
         body,
@@ -296,6 +463,7 @@ export class GuardioCore {
         eventSinks,
         agentId,
         agentNameSnapshot,
+        simulation: simulationContext,
       });
       if (processResult.handled) {
         if (processResult.body)
@@ -306,10 +474,96 @@ export class GuardioCore {
       const bodyToSend = processResult.bodyToSend;
       let request: JsonRpcRequest;
       try {
-        request = JSON.parse(body) as JsonRpcRequest;
+        request = JSON.parse(bodyToSend) as JsonRpcRequest;
       } catch {
         request = {};
       }
+
+      const method = request.method;
+      if (method === "tools/call") {
+        logger.debug(
+          {
+            serverName,
+            requestId: request.id,
+            toolName: (request.params as { name?: string } | undefined)?.name,
+            argsKeys:
+              request.params && typeof request.params === "object"
+                ? Object.keys((request.params as { arguments?: unknown }).arguments ?? {})
+                : undefined,
+          },
+          "tools/call parsed for proxying",
+        );
+      }
+
+      // Simulation Mode gate: after policies, before upstream MCP call.
+      const simulationActive =
+        method === "tools/call" && !!simulationContext && simulationContext.enabled;
+
+      if (simulationActive) {
+        const sim = simulationContext!;
+        logger.info(
+          {
+            serverName,
+            toolName:
+              (request.params as { name?: string } | undefined)?.name ??
+              "(unknown)",
+            requestId: request.id,
+            source: sim.source,
+          },
+          "Simulation active: returning simulated result (skipping upstream MCP)",
+        );
+        const tools = this.toolsDiscovery.getToolsForServer(serverName) ?? [];
+        const toolName =
+          (request.params as { name?: string } | undefined)?.name ??
+          "(unknown)";
+        const toolInfo =
+          tools.find((t) => t.name === toolName) ??
+          ({ name: toolName } as { name: string; inputSchema?: object });
+
+        const simulatedResult = await this.simulationService.generateSimulatedResult(
+          {
+            serverName,
+            tool: toolInfo,
+            args: (request.params as { arguments?: unknown } | undefined)
+              ?.arguments,
+            agentId,
+            agentNameSnapshot,
+            requestId: request.id,
+            source: sim.source,
+          },
+        );
+
+        const responseBody = JSON.stringify({
+          jsonrpc: request.jsonrpc ?? "2.0",
+          id: request.id,
+          result: simulatedResult,
+        });
+
+        // In MCP HTTP transport, clients typically listen on SSE for responses.
+        // Mirror the "handled" path behavior by broadcasting the simulated JSON-RPC response.
+        this.sendToClient(responseBody, serverName);
+        logger.debug(
+          { serverName, requestId: request.id, bytes: responseBody.length },
+          "Simulation response broadcast to SSE clients",
+        );
+        return { status: 200, body: responseBody };
+      }
+
+      if (method === "tools/call") {
+        logger.debug(
+          {
+            serverName,
+            toolName:
+              (request.params as { name?: string } | undefined)?.name ??
+              "(unknown)",
+            requestId: request.id,
+            guardioMode,
+            simulationContext,
+          },
+          "Simulation inactive: forwarding tools/call to upstream MCP",
+        );
+      }
+
       const methodFromBodyToSend =
         bodyToSend !== body
           ? (() => {

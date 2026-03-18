@@ -21,6 +21,7 @@ export async function listEventsForDashboard(
         agentNameSnapshot: e.agentNameSnapshot ?? null,
         decision: e.decision ?? null,
         policyEvaluation: e.policyEvaluation ?? null,
+        simulation: e.simulation ?? null,
       })),
     };
   } catch (err) {

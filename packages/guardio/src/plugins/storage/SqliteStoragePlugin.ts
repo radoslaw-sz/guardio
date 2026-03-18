@@ -46,7 +46,8 @@ class SqliteEventSinkRepository implements EventSinkRepository {
     const rows = this.db
       .prepare(
         `SELECT event_id AS eventId, timestamp, event_type AS eventType, action_type AS actionType,
-                agent_id AS agentId, agent_name_snapshot AS agentNameSnapshot, decision, policy_evaluation AS policyEvaluation
+                agent_id AS agentId, agent_name_snapshot AS agentNameSnapshot, decision,
+                policy_evaluation AS policyEvaluation, simulation
          FROM guardio_events
          ORDER BY created_at DESC
          LIMIT ?`,
@@ -60,8 +61,9 @@ class SqliteEventSinkRepository implements EventSinkRepository {
       agentNameSnapshot: string | null;
       decision: string | null;
       policyEvaluation: string | null;
+        simulation: string | null;
     }>;
-    return rows.map((r) => ({
+    const events = rows.map((r) => ({
       eventId: r.eventId,
       timestamp: r.timestamp,
       eventType: r.eventType,
@@ -72,18 +74,31 @@ class SqliteEventSinkRepository implements EventSinkRepository {
       policyEvaluation: r.policyEvaluation
         ? (JSON.parse(r.policyEvaluation) as Record<string, unknown>)
         : undefined,
+      simulation: r.simulation
+        ? (JSON.parse(r.simulation) as StoredEvent["simulation"])
+        : null,
     }));
+    return events;
   }
 
   async insert(event: GuardioEvent): Promise<void> {
+    logger.debug(
+      {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        actionType: event.actionType,
+        simulation: event.simulation,
+      },
+      "Persisting GuardioEvent",
+    );
     this.db
       .prepare(
         `INSERT INTO guardio_events (
           event_id, schema_version, timestamp, event_type, action_type,
           agent_id, agent_name_snapshot, trace_id, span_id, target_resource, decision,
-          policy_evaluation, request_payload, response_payload, metrics, metadata,
+          policy_evaluation, request_payload, response_payload, metrics, metadata, simulation,
           http_status, error_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.eventId,
@@ -102,6 +117,7 @@ class SqliteEventSinkRepository implements EventSinkRepository {
         jsonOrNull(event.responsePayload),
         jsonOrNull(event.metrics),
         jsonOrNull(event.metadata),
+        jsonOrNull(event.simulation),
         event.httpStatus ?? null,
         event.errorCode ?? null,
       );
@@ -382,10 +398,24 @@ export class SqliteStoragePlugin implements StorageAdapter {
           response_payload     TEXT,
           metrics              TEXT,
           metadata             TEXT,
+          simulation           TEXT,
           http_status          INTEGER,
           error_code           TEXT,
           created_at           TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        -- Runtime settings (global or scoped key/value configuration)
+        CREATE TABLE IF NOT EXISTS runtime_settings (
+          key           TEXT NOT NULL,
+          scope_type    TEXT,
+          scope_id      TEXT,
+          value         TEXT NOT NULL,
+          updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (key, scope_type, scope_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_runtime_settings_scope
+          ON runtime_settings(scope_type, scope_id);
 
         -- Plugin data storage (for policy plugins to store custom data)
         CREATE TABLE IF NOT EXISTS plugin_data (

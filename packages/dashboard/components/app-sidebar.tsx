@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Network,
   Shield,
+  FlaskConical,
 } from "lucide-react";
 
 import { NavMain, type NavGroup } from "@/components/nav-main";
@@ -35,6 +36,12 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Agents", url: "/dashboard/agents", icon: GalleryVerticalEnd },
       { title: "MCPs", url: "/dashboard/mcps", icon: Network },
+    ],
+  },
+  {
+    label: "Testing",
+    items: [
+      { title: "Simulation", url: "/dashboard/simulation", icon: FlaskConical },
     ],
   },
 ];

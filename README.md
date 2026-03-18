@@ -8,7 +8,7 @@
   </h1>
 </p>
 
-Guardio is a **proxy** that sits between your **AI Agent system** and the external world. It catches and evaluates messages flowing to and from **MCP tools** and other APIs before they reach the real servers. You can enforce policies (allow, block, sanitize), require approval, and observe activity—all through a **plugin system**.
+Guardio is a **proxy** that sits between your **AI Agent system** and the external world. It catches and evaluates messages flowing to and from **MCP tools** and other APIs before they reach the real servers. You can enforce policies (allow, block, sanitize), require approval, simulate MCP responses and observe activity—all through a **plugin system**.
 
 <p align="center">
   <picture>
@@ -58,6 +58,30 @@ npm run guardio
 ```
 
 Point your AI Agent or MCP client at `http://127.0.0.1:<port>`. If you installed the dashboard, run `pnpm run dashboard` (or `npm run dashboard`) and point it at the same Guardio base URL.
+
+### Run Guardio with Docker
+
+A minimal Docker image is provided for the core Guardio HTTP server (package `@guardiojs/guardio`). Build it from the `packages/guardio` directory:
+
+```bash
+cd packages/guardio
+docker build -t guardio .
+```
+
+Run the container, mounting your `guardio.config.*` into the container and mapping the HTTP port (defaults to `3939` unless overridden in config or via env):
+
+```bash
+docker run --rm \
+  -p 3939:3939 \
+  -v "$(pwd)/guardio.config.ts:/config/guardio.config.ts:ro" \
+  guardio \
+  --config /config/guardio.config.ts
+```
+
+The container:
+
+- **Exposes** port `3939` by default (override with `GUARDIO_HTTP_PORT` / `GUARDIO_HTTP_HOST`).
+- **Starts** the Guardio CLI via `node bin/guardio.mjs` (you can pass any CLI args after the image name).
 
 ---
 
@@ -190,6 +214,47 @@ If **EventSink** plugins are configured, Guardio emits a **GuardioEvent** for ea
 - For blocks: **policy name**, **code**, **reason**
 
 EventSinkStore (e.g. sqlite or postgres) persists these for the dashboard and for your own auditing.
+
+---
+
+## Simulation Mode (Testing)
+
+Guardio supports **Simulation Mode**, which returns **mocked tool responses** instead of calling the real upstream MCP server. This is useful for testing and demos because **policies still run first**, but the upstream call is skipped.
+
+### How Simulation Mode is applied
+
+- **Global simulation**: when enabled, **all** `tools/call` requests are simulated (regardless of per-tool settings).
+- **Per-tool simulation**: when global simulation is off, you can mark specific tools as simulated **per MCP server + tool name**.
+- **Per-request header**: `X-Guardio-Mode: simulation` can simulate a single request when global simulation is off.
+
+### Dashboard controls
+
+In the dashboard sidebar, open **Testing → Simulation** to:
+
+- Toggle **Global simulation** on/off
+- Configure **Per-tool simulation** per MCP server + tool
+
+These settings are stored in the database (runtime settings) and can be changed **without restarting** Guardio.
+
+### API endpoints
+
+- **GET** `/api/testing/simulation` – returns current simulation settings
+- **PUT** `/api/testing/simulation` – updates simulation settings
+
+Example payload:
+
+```json
+{
+  "globalSimulated": false,
+  "tools": [
+    { "serverName": "docs", "toolName": "search", "simulated": true }
+  ]
+}
+```
+
+### Events
+
+When Simulation Mode is used for a `tools/call`, Guardio records simulation details in the event so the dashboard activity feed can render it (e.g. `simulation.enabled` and `simulation.source`).
 
 ---
 

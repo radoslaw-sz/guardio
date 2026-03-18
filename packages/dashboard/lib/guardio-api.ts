@@ -268,6 +268,54 @@ export async function deletePolicyInstance(policyInstanceId: string): Promise<vo
   }
 }
 
+export interface DashboardSimulationToolSetting {
+  serverName: string;
+  toolName: string;
+  simulated: boolean;
+}
+
+export interface DashboardSimulationSettings {
+  globalSimulated: boolean;
+  tools: DashboardSimulationToolSetting[];
+}
+
+export function getGuardioSimulationUrl(): string {
+  const base = defaultBaseUrl.replace(/\/$/, "");
+  return `${base}/api/testing/simulation`;
+}
+
+export async function fetchSimulationSettings(): Promise<DashboardSimulationSettings | null> {
+  try {
+    const res = await fetch(getGuardioSimulationUrl(), {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as DashboardSimulationSettings;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSimulationSettings(
+  body: DashboardSimulationSettings,
+): Promise<{ error?: string } | void> {
+  const res = await fetch(getGuardioSimulationUrl(), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 204) return;
+  if (!res.ok) {
+    try {
+      const json = (await res.json()) as { error?: string };
+      return { error: json.error ?? res.statusText };
+    } catch {
+      return { error: res.statusText || "Failed to update simulation settings" };
+    }
+  }
+}
+
 /** Single event from GET /api/events (guardio_events for activity feed). */
 export interface DashboardActivityEvent {
   eventId: string;
@@ -278,6 +326,10 @@ export interface DashboardActivityEvent {
   agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string; code?: string; reason?: string } | null;
+  simulation?: {
+    enabled: boolean;
+    source?: "global" | "header";
+  } | null;
 }
 
 export interface DashboardEventsInfo {

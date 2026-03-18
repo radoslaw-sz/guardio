@@ -416,4 +416,36 @@ export class PostgresCoreRepository implements CoreRepository {
     }
     return out;
   }
+
+  async getRuntimeSetting(
+    key: string,
+    scopeType: string | null = null,
+    scopeId: string | null = null,
+  ): Promise<unknown | null> {
+    const result = await this.pool.query(
+      `SELECT value
+       FROM runtime_settings
+       WHERE key = $1 AND scope_type IS NOT DISTINCT FROM $2 AND scope_id IS NOT DISTINCT FROM $3`,
+      [key, scopeType, scopeId],
+    );
+    const row = result.rows[0] as { value: unknown } | undefined;
+    if (!row) return null;
+    return row.value ?? null;
+  }
+
+  async setRuntimeSetting(
+    key: string,
+    value: unknown,
+    scopeType: string | null = null,
+    scopeId: string | null = null,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO runtime_settings (key, scope_type, scope_id, value, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT(key, scope_type, scope_id) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = EXCLUDED.updated_at`,
+      [key, scopeType, scopeId, value],
+    );
+  }
 }

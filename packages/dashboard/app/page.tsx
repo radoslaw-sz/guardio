@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/sidebar"
 import { ConnectionStatus } from "@/components/connection-status"
 import { RecentActivity } from "@/components/recent-activity"
+import { SimulationBanner } from "@/components/simulation-banner"
 
 export default function Page() {
   return (
@@ -27,6 +28,7 @@ export default function Page() {
           }
         />
         <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+          <SimulationBanner />
           {/* Top row: Connection status cards */}
           <ConnectionStatus />
           

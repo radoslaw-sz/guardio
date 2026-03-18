@@ -30,6 +30,34 @@ export interface GuardioBlockedResult {
   };
 }
 
+/**
+ * Successful JSON-RPC result returned when Guardio simulates a tool call.
+ * Returned as result (not error) so AI Agent frameworks treat it as a normal tool response.
+ */
+export interface GuardioSimulatedResult {
+  /** MCP-style content for the agent to display. */
+  content: Array<{ type: "text"; text: string }>;
+  /**
+   * Some agent runtimes only surface tool output when isError=true.
+   * For simulation, we may set this true to ensure the agent comments on it,
+   * while _guardio.action=TOOL_SIMULATED disambiguates it from real errors/denials.
+   */
+  isError?: boolean;
+  /** Guardio metadata; prefixed to avoid clashing with MCP result fields. */
+  _guardio: {
+    version: string;
+    requestId: string | number;
+    timestamp: string;
+    /** Action type e.g. TOOL_SIMULATED. */
+    action: string;
+    /** Simulation activation source. */
+    simulation: { enabled: true; source?: "global" | "header" | "tool" };
+    /** Optional context fields for debugging/analytics. */
+    toolName?: string;
+    serverName?: string;
+  };
+}
+
 export interface JsonRpcResponse {
   jsonrpc?: string;
   id?: string | number;
@@ -75,4 +103,6 @@ export const GuardioAction = {
   TOOL_BLOCKED: "TOOL_BLOCKED",
   /** Policy violation (e.g. tool call denied by policy). */
   POLICY_VIOLATION: "POLICY_VIOLATION",
+  /** Tool execution was simulated (no upstream MCP call). */
+  TOOL_SIMULATED: "TOOL_SIMULATED",
 } as const;

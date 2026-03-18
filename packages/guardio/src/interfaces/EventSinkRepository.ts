@@ -11,6 +11,11 @@ export interface StoredEvent {
   agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: Record<string, unknown> | null;
+  /** Optional simulation info when Simulation Mode was active for the event. */
+  simulation?: {
+    enabled: boolean;
+    source?: "global" | "header" | "tool";
+  } | null;
 }
 
 /**

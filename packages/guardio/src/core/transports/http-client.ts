@@ -20,6 +20,7 @@ import { BusTopic } from "./types.js";
 import type {
   DashboardActiveClientInfo,
   DashboardPolicyInstancesInfo,
+  DashboardSimulationSettings,
 } from "./dashboard-api-types.js";
 import type {
   PostRequestPayload,
@@ -35,6 +36,7 @@ const API_CONNECTION_PATH = "/api/connection";
 const API_POLICIES_PATH = "/api/policies";
 const API_POLICY_INSTANCES_PATH = "/api/policy-instances";
 const API_EVENTS_PATH = "/api/events";
+const API_SIMULATION_PATH = "/api/testing/simulation";
 
 /**
  * We need to hold open SSE response streams in memory so we can write to them on broadcast.
@@ -126,8 +128,8 @@ export class HttpClientTransport extends EventEmitter implements IClientTranspor
 
     await app.register(fastifyCors, {
       origin: true,
-      methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Accept", "x-agent-name"],
+      methods: ["GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Accept", "x-agent-name", "X-Guardio-Mode"],
     });
 
     app.addContentTypeParser(
@@ -204,6 +206,69 @@ export class HttpClientTransport extends EventEmitter implements IClientTranspor
         return reply.status(200).type("application/json").send(data);
       } catch (err) {
         logger.error({ err }, "GET /api/events failed");
+        return reply.status(500).send({ error: "Internal server error" });
+      }
+    });
+
+    app.get(API_SIMULATION_PATH, async (_request, reply) => {
+      const handler = this.dashboardHooks?.handleGetSimulationSettings;
+      if (!handler) {
+        return reply
+          .status(404)
+          .send({ error: "Get simulation settings not configured" });
+      }
+      try {
+        const data: DashboardSimulationSettings | null = await handler();
+        if (data == null) {
+          return reply
+            .status(503)
+            .send({ error: "Simulation settings not available" });
+        }
+        return reply.status(200).type("application/json").send(data);
+      } catch (err) {
+        logger.error({ err }, "GET /api/testing/simulation failed");
+        return reply.status(500).send({ error: "Internal server error" });
+      }
+    });
+
+    app.put(API_SIMULATION_PATH, async (request, reply) => {
+      const handler = this.dashboardHooks?.handleUpdateSimulationSettings;
+      if (!handler) {
+        return reply
+          .status(404)
+          .send({ error: "Update simulation settings not configured" });
+      }
+      let body = request.body as unknown;
+      if (typeof body === "string") {
+        try {
+          body = JSON.parse(body) as unknown;
+        } catch {
+          return reply.status(400).send({ error: "Invalid JSON body" });
+        }
+      }
+
+      if (
+        body == null ||
+        typeof body !== "object" ||
+        typeof (body as { globalSimulated?: unknown }).globalSimulated !==
+          "boolean" ||
+        !Array.isArray((body as { tools?: unknown }).tools)
+      ) {
+        return reply.status(400).send({
+          error:
+            "Body must include globalSimulated (boolean) and tools (array)",
+        });
+      }
+      try {
+        const result = await handler(
+          body as unknown as DashboardSimulationSettings,
+        );
+        if (result && result.error) {
+          return reply.status(400).type("application/json").send(result);
+        }
+        return reply.status(204).send();
+      } catch (err) {
+        logger.error({ err }, "PUT /api/testing/simulation failed");
         return reply.status(500).send({ error: "Internal server error" });
       }
     });
@@ -374,6 +439,7 @@ export class HttpClientTransport extends EventEmitter implements IClientTranspor
       }
       const body = typeof request.body === "string" ? request.body : "";
       const agentNameSnapshot = (request.headers["x-agent-name"] as string | undefined)?.trim() ?? null;
+      const guardioModeHeader = (request.headers["x-guardio-mode"] as string | undefined)?.trim() ?? null;
       let agentId: string | null = null;
       if (agentNameSnapshot) {
         const agent = await this.coreRepository.getAgentByName(agentNameSnapshot, mcpId);
@@ -385,6 +451,7 @@ export class HttpClientTransport extends EventEmitter implements IClientTranspor
         serverName: mcpId,
         agentNameSnapshot: agentNameSnapshot ?? null,
         agentId: agentId ?? null,
+        guardioMode: guardioModeHeader,
         reply: (status: number, responseBody: string) => {
           if (replied) return;
           replied = true;

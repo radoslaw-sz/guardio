@@ -24,6 +24,7 @@ function mapEventToActivity(e: {
   agentId?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string } | null;
+  simulation?: { enabled: boolean; source?: "global" | "header" } | null;
 }): ActivityEntrySerialized {
   return {
     id: e.eventId,
@@ -32,6 +33,7 @@ function mapEventToActivity(e: {
     agent: e.agentId ?? "Unknown",
     tool: e.actionType ?? e.eventType ?? "—",
     policy: e.policyEvaluation?.policyName,
+    simulation: e.simulation,
   };
 }
 

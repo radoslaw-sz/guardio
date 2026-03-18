@@ -140,10 +140,24 @@ CREATE TABLE IF NOT EXISTS guardio_events (
   response_payload     JSONB,
   metrics              JSONB,
   metadata             JSONB,
+  simulation           JSONB,
   http_status          INTEGER,
   error_code           TEXT,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Runtime settings (global or scoped key/value configuration)
+CREATE TABLE IF NOT EXISTS runtime_settings (
+  key           TEXT NOT NULL,
+  scope_type    TEXT,
+  scope_id      TEXT,
+  value         JSONB NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (key, scope_type, scope_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_settings_scope
+  ON runtime_settings(scope_type, scope_id);
 
 -- Plugin data storage (for policy plugins to store custom data)
 CREATE TABLE IF NOT EXISTS plugin_data (
@@ -173,13 +187,14 @@ class PostgresEventSinkRepository implements EventSinkRepository {
     const limit = Math.min(Math.max(options?.limit ?? 100, 1), 1000);
     const result = await this.pool.query(
       `SELECT event_id AS "eventId", timestamp, event_type AS "eventType", action_type AS "actionType",
-              agent_id AS "agentId", agent_name_snapshot AS "agentNameSnapshot", decision, policy_evaluation AS "policyEvaluation"
+              agent_id AS "agentId", agent_name_snapshot AS "agentNameSnapshot", decision,
+              policy_evaluation AS "policyEvaluation", simulation
        FROM guardio_events
        ORDER BY created_at DESC
        LIMIT $1`,
       [limit],
     );
-    return result.rows.map(
+    const events = result.rows.map(
       (r: {
         eventId: string;
         timestamp: string;
@@ -189,6 +204,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         agentNameSnapshot: string | null;
         decision: string | null;
         policyEvaluation: Record<string, unknown> | null;
+        simulation: StoredEvent["simulation"] | null;
       }) => ({
         eventId: r.eventId,
         timestamp: r.timestamp,
@@ -198,18 +214,33 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         agentNameSnapshot: r.agentNameSnapshot ?? undefined,
         decision: r.decision ?? undefined,
         policyEvaluation: r.policyEvaluation ?? undefined,
+        simulation: r.simulation ?? null,
       }),
     );
+    logger.debug(
+      { count: events.length },
+      "PostgresEventSinkRepository.list: loaded events from guardio_events",
+    );
+    return events;
   }
 
   async insert(event: GuardioEvent): Promise<void> {
+    logger.debug(
+      {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        actionType: event.actionType,
+        simulation: event.simulation,
+      },
+      "PostgresEventSinkRepository.insert: persisting GuardioEvent",
+    );
     await this.pool.query(
       `INSERT INTO guardio_events (
         event_id, schema_version, timestamp, event_type, action_type,
         agent_id, agent_name_snapshot, trace_id, span_id, target_resource, decision,
-        policy_evaluation, request_payload, response_payload, metrics, metadata,
+        policy_evaluation, request_payload, response_payload, metrics, metadata, simulation,
         http_status, error_code
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         event.eventId,
         event.schemaVersion,
@@ -227,6 +258,7 @@ class PostgresEventSinkRepository implements EventSinkRepository {
         jsonOrNull(event.responsePayload),
         jsonOrNull(event.metrics),
         jsonOrNull(event.metadata),
+        jsonOrNull(event.simulation),
         event.httpStatus ?? null,
         event.errorCode ?? null,
       ],

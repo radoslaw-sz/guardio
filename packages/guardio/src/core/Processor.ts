@@ -29,6 +29,15 @@ export interface ProcessInput {
   policyPlugins: PolicyPluginInterface[];
   /** Optional event sinks to emit processing result events. */
   eventSinks?: EventSinkPluginInterface[];
+  /**
+   * Optional simulation metadata for event sinks.
+   * When provided, processing events will be annotated to indicate that
+   * Simulation Mode was enabled for this request and what activated it.
+   */
+  simulation?: {
+    enabled: boolean;
+    source?: "global" | "header" | "tool";
+  };
   /** Optional agent id for event correlation. */
   agentId?: string | null;
   /** Optional agent name snapshot for event correlation. */
@@ -121,6 +130,7 @@ function buildProcessingEvent(
     traceId: input.traceId ?? undefined,
     targetResource: toolName,
     decision: outcome.decision,
+    simulation: input.simulation,
     policyEvaluation:
       outcome.decision === "BLOCKED" && outcome.policyName
         ? {

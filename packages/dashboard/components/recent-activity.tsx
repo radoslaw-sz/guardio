@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronRight, CheckCircle2, XCircle, Shield } from "lucide-react";
 import { fetchEvents } from "@/lib/guardio-api";
 import { RelativeTime } from "./relative-time";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export interface ActivityEntry {
   id: string;
@@ -13,6 +14,16 @@ export interface ActivityEntry {
   agent: string;
   tool: string;
   policy?: string;
+  simulation?: {
+    enabled: boolean;
+    source?: "global" | "header";
+  } | null;
+}
+
+function getSimulationTooltipText(source?: "global" | "header") {
+  if (source === "global") return "Simulated (global settings)";
+  if (source === "header") return "Simulated (request header)";
+  return "Simulated";
 }
 
 function mapEventToActivity(e: {
@@ -24,6 +35,7 @@ function mapEventToActivity(e: {
   agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string } | null;
+  simulation?: { enabled: boolean; source?: "global" | "header" } | null;
 }): ActivityEntry {
   return {
     id: e.eventId,
@@ -32,6 +44,7 @@ function mapEventToActivity(e: {
     agent: e.agentNameSnapshot ?? e.agentId ?? "Unknown",
     tool: e.actionType ?? e.eventType ?? "—",
     policy: e.policyEvaluation?.policyName,
+    simulation: e.simulation,
   };
 }
 
@@ -61,7 +74,8 @@ export function RecentActivity() {
   const recentFive = activities.slice(0, 5);
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
+    <TooltipProvider>
+      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
       {/* Header */}
       <div className="p-6 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center justify-between">
@@ -121,9 +135,23 @@ export function RecentActivity() {
                           agent
                         </span>
                       </span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
-                        <RelativeTime date={activity.timestamp} />
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {activity.simulation?.enabled ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center rounded-full border border-sky-200/70 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-900 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-100">
+                                Simulated
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>
+                              {getSimulationTooltipText(activity.simulation.source)}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          <RelativeTime date={activity.timestamp} />
+                        </span>
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">
@@ -168,6 +196,7 @@ export function RecentActivity() {
           </ul>
         )}
       </div>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

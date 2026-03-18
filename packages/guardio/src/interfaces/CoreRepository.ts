@@ -149,4 +149,21 @@ export interface CoreRepository {
       }>
     >
   >;
+
+  /**
+   * Runtime settings (global or scoped). Optional; when implemented, used for
+   * settings like Simulation Mode that must be changeable without restart.
+   */
+  getRuntimeSetting?(
+    key: string,
+    scopeType?: string | null,
+    scopeId?: string | null,
+  ): Promise<unknown | null>;
+
+  setRuntimeSetting?(
+    key: string,
+    value: unknown,
+    scopeType?: string | null,
+    scopeId?: string | null,
+  ): Promise<void>;
 }

@@ -109,9 +109,32 @@ export interface DashboardActivityEvent {
   agentNameSnapshot?: string | null;
   decision?: string | null;
   policyEvaluation?: { policyName?: string; code?: string; reason?: string } | null;
+   /** Optional simulation info when Simulation Mode was active for this event. */
+   simulation?: {
+     enabled: boolean;
+     source?: "global" | "header" | "tool";
+   } | null;
 }
 
 /** GET /api/events response. */
 export interface DashboardEventsInfo {
   events: DashboardActivityEvent[];
 }
+
+/** Per-tool simulation setting scoped by server + tool name. */
+export interface DashboardSimulationToolSetting {
+  serverName: string;
+  toolName: string;
+  simulated: boolean;
+}
+
+/** Simulation Mode configuration for dashboard Testing/Simulation. */
+export interface DashboardSimulationSettings {
+  /** When true, all tools are simulated regardless of per-tool settings. */
+  globalSimulated: boolean;
+  /** Optional per-tool overrides by (serverName, toolName). */
+  tools: DashboardSimulationToolSetting[];
+}
+
+/** Request body for updating Simulation Mode configuration. */
+export type UpdateSimulationSettingsBody = DashboardSimulationSettings;

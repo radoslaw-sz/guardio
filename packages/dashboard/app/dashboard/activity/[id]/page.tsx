@@ -53,6 +53,13 @@ export default async function ActivityDetailPage({
   const decision = event.decision ?? "—";
   const isDenied = event.decision === "BLOCKED";
   const policy = event.policyEvaluation;
+  const simulation = event.simulation?.enabled ? event.simulation : null;
+  const simulationLabel =
+    simulation?.source === "global"
+      ? "Simulated (global settings)"
+      : simulation?.source === "header"
+        ? "Simulated (request header)"
+        : "Simulated";
 
   return (
     <SidebarProvider>
@@ -103,9 +110,16 @@ export default async function ActivityDetailPage({
                   <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
                     {isDenied ? "Denied" : "Allowed"}
                   </h1>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {formatTimestamp(event.timestamp)}
-                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    {simulation ? (
+                      <span className="inline-flex items-center rounded-full border border-sky-200/70 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-900 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-100">
+                        {simulationLabel}
+                      </span>
+                    ) : null}
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {formatTimestamp(event.timestamp)}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

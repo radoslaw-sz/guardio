@@ -6,6 +6,8 @@ import type {
   DashboardPolicyInstancesInfo,
   DashboardEventsInfo,
   DashboardActiveClientInfo,
+  DashboardSimulationSettings,
+  UpdateSimulationSettingsBody,
 } from "./dashboard-api-types.js";
 
 /**
@@ -20,6 +22,11 @@ export interface PostRequestPayload {
   agentNameSnapshot?: string | null;
   /** Resolved from DB by agent name (x-agent-name) + serverName; null if no header or agent not found. When null, only global and tool-scoped policy assignments apply. */
   agentId?: string | null;
+  /**
+   * Optional Guardio mode for this request, derived from headers (e.g. X-Guardio-Mode).
+   * When set to 'simulation', the core may short-circuit the upstream MCP call.
+   */
+  guardioMode?: string | null;
 }
 
 /**
@@ -138,6 +145,14 @@ export interface ClientTransportDashboardHooks {
     id: string,
     body: UpdatePolicyInstanceBody,
   ) => Promise<UpdatePolicyInstanceResult>;
+
+  /** GET /api/testing/simulation → get Simulation Mode configuration (global + per-tool). */
+  handleGetSimulationSettings?: () => Promise<DashboardSimulationSettings | null>;
+
+  /** PUT /api/testing/simulation → update Simulation Mode configuration. */
+  handleUpdateSimulationSettings?: (
+    body: UpdateSimulationSettingsBody,
+  ) => Promise<{ error?: string } | void>;
 }
 
 /** Body for PATCH /api/policy-instances/:id. */

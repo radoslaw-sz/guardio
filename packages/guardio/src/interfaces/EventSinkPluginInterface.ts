@@ -21,6 +21,17 @@ export type GuardioEvent = {
   metrics?: Record<string, any>;
   metadata?: Record<string, any>;
 
+  /**
+   * Simulation-related metadata. Indicates whether Simulation Mode was in effect
+   * when this event was produced, and what activated it.
+   */
+  simulation?: {
+    /** Whether Simulation Mode was enabled for this request. */
+    enabled: boolean;
+    /** Source of activation (e.g. global runtime setting vs per-request header). */
+    source?: "global" | "header" | "tool";
+  };
+
   httpStatus?: number;
   errorCode?: string;
 

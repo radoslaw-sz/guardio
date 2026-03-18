@@ -435,4 +435,42 @@ export class SqliteCoreRepository implements CoreRepository {
     }
     return out;
   }
+
+  async getRuntimeSetting(
+    key: string,
+    scopeType: string | null = null,
+    scopeId: string | null = null,
+  ): Promise<unknown | null> {
+    const row = this.db
+      .prepare(
+        `SELECT value
+         FROM runtime_settings
+         WHERE key = ? AND scope_type IS ? AND scope_id IS ?`,
+      )
+      .get(key, scopeType, scopeId) as { value: string } | undefined;
+    if (!row) return null;
+    try {
+      return JSON.parse(row.value) as unknown;
+    } catch {
+      return row.value;
+    }
+  }
+
+  async setRuntimeSetting(
+    key: string,
+    value: unknown,
+    scopeType: string | null = null,
+    scopeId: string | null = null,
+  ): Promise<void> {
+    const valueJson = JSON.stringify(value ?? null);
+    this.db
+      .prepare(
+        `INSERT INTO runtime_settings (key, scope_type, scope_id, value, updated_at)
+         VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(key, scope_type, scope_id) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      .run(key, scopeType, scopeId, valueJson);
+  }
 }
