@@ -8,7 +8,7 @@
   </h1>
 </p>
 
-Guardio is a **proxy** that sits between your **AI Agent system** and the external world. It catches and evaluates messages flowing to and from **MCP tools** and other APIs before they reach the real servers. You can enforce policies (allow, block, sanitize), require approval, simulate MCP responses and observe activity—all through a **plugin system**.
+Guardio is a **control plane** that sits between your **AI Agent system** and the external world. It catches and evaluates messages flowing to and from **MCP tools** and other APIs before they reach the real servers. You can enforce policies (allow, block, sanitize), require approval, simulate MCP responses and observe activity—all through a **plugin system**.
 
 <p align="center">
   <picture>
